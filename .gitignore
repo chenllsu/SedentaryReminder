@@ -8,6 +8,10 @@ dist/
 
 # 本地运行配置
 config.json
+config.json.tmp
+
+# 日志
+*.log
 
 # 图片处理中间稿（最终形象在 assets/）
 A_*.png
@@ -18,3 +22,6 @@ A_*.png
 # 测试用临时图
 assets/_preview_cut.png
 assets/_smoke_desktop.png
+
+# 渲染预览/诊断临时效果图（不进仓库）
+assets/_previews/
