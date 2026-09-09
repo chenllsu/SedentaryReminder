@@ -98,18 +98,25 @@ SitReminder.spec            # PyInstaller 打包配置（Qt 版）
 ## 开发
 
 ```bash
+# 建议先建虚拟环境并安装依赖（避免污染系统 Python）
+python -m venv .venv
+# Windows: .venv\Scripts\activate     Linux/macOS: source .venv/bin/activate
+pip install PySide6 pillow
+
 # 核心逻辑测试（不弹窗口；框架无关，用解释器跑）
-py -3.9 -m unittest discover -s tests -v
+python -m unittest discover -s tests -v
 
 # Qt 版 GUI 渲染冒烟（要求装了 PySide6 的解释器；会输出预览图到 assets/_previews/）
-"C:/Users/50214/.workbuddy/binaries/python/envs/default/Scripts/python.exe" tests/smoke_qt.py
+python tests/smoke_qt.py
 
-# Tk 版 GUI 冒烟（回退路径；需 py -3.9 这种有 tkinter 的解释器）
-py -3.9 tests/smoke_gui.py
+# Tk 版 GUI 冒烟（回退路径；需装了 tkinter 的解释器）
+python tests/smoke_gui.py
 
 # 带调试日志启动
-"C:/Users/50214/.workbuddy/binaries/python/envs/default/Scripts/python.exe" main.py --debug
+python main.py --debug
 ```
+
+> 提示：源码里只有 Qt 版（`sitreminder/qt/`）是当前主用；Tk 版（`sitreminder/ui/`、`app.py` 等）是早期实现，保留作回退路径。若本机没有图形界面 / 未安装 tkinter，跳过 `smoke_gui.py` 即可。
 
 日志写入用户数据目录（Windows：`%LOCALAPPDATA%\SitReminder\sitreminder.log`），
 打包成无控制台版本后也能据此排查问题。

@@ -1,6 +1,6 @@
 """核心逻辑单元测试（纯逻辑，不弹窗口）。
 
-运行：py -3.9 -m unittest discover -s tests -v
+运行：python -m unittest discover -s tests -v
 """
 
 import os

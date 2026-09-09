@@ -1,7 +1,7 @@
 """GUI 冒烟测试：真的把窗口、图片、动画都跑一遍，几秒后自动关闭。
 
 用于验证「改造后还能不能起来」，不替代人眼验收。
-运行：py -3.9 tests/smoke_gui.py
+运行：python tests/smoke_gui.py
 """
 
 import os
