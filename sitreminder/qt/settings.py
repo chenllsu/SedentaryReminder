@@ -19,6 +19,7 @@ MINUTES_MIN, MINUTES_MAX = 1, 600
 
 class SettingsWindow(QWidget):
     saved = Signal(int, bool)   # (interval_seconds, autostart)
+    closed = Signal()           # 窗口关闭（点「保存」或点右上角 X 都算）
 
     def __init__(self, ctrl, cfg):
         super().__init__()
@@ -117,6 +118,14 @@ class SettingsWindow(QWidget):
 
     def _err(self, msg: str):
         QMessageBox.warning(self, "输入错误", msg)
+
+    def closeEvent(self, e):
+        """关闭时通知控制器（无论点「保存」还是点 X）。
+
+        控制器据此决定：从冻结处继续计时，还是已按新间隔重算过了。
+        """
+        super().closeEvent(e)
+        self.closed.emit()
 
     def show_right_of(self, ref):
         """置于妮子浮窗右侧、垂直居中，并保证不超出屏幕。"""

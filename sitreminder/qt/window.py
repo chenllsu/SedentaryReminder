@@ -364,12 +364,10 @@ class SitReminderWindow(QWidget):
             self.move(self._press_win + delta)
 
     def mouseReleaseEvent(self, e):
-        if e.button() == Qt.LeftButton:
-            if self._dragging:
-                # 拖动结束：记下最后位置，下次启动回到这里（而不是固定坐标）
-                self.ctrl.save_window_pos(self.pos())
-            else:
-                self.ctrl.open_settings()
+        # 左键「单击」不再做任何事（原先会弹设置窗，容易误触）。
+        # 设置窗改由右键菜单或托盘菜单打开；左键只用于拖动，松手时记下位置。
+        if e.button() == Qt.LeftButton and self._dragging:
+            self.ctrl.save_window_pos(self.pos())
         self._press_global = None
         self._dragging = False
 

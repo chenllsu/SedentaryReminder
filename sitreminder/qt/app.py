@@ -51,6 +51,9 @@ class QtController:
         self.tray = None
         self._tray_menu = None
         self._minimized = False
+        # 本次「打开设置」期间提醒间隔是否被改动（决定关窗后继续计时 or 按新间隔重算）
+        self._settings_interval_changed = False
+        self._exiting = False
 
     # ------------------------------------------------------------ 启动
     def _build_main_window(self):
@@ -123,6 +126,7 @@ class QtController:
             return
         tray_menu = QMenu()
         tray_menu.addAction("显示", self.show_main)
+        tray_menu.addAction("设置", self.open_settings)
         tray_menu.addAction("暂停/继续", self.toggle_pause)
         tray_menu.addAction("跳过本次", self.on_skip)
         tray_menu.addSeparator()
@@ -192,16 +196,46 @@ class QtController:
             self._settings.raise_()
             self._settings.activateWindow()
             return
+        # 打开设置期间冻结倒计时：剩余秒数被记下、时钟停走；
+        # 关窗时再决定「从冻结处继续」还是「按新间隔重算」（见 _on_settings_closed）。
+        self._settings_interval_changed = False
+        self.timer.pause()
+        self._sync_pause_state()
         self._settings = SettingsWindow(self, self.cfg)
         self._settings.saved.connect(self.apply_settings)
+        self._settings.closed.connect(self._on_settings_closed)
         self._settings.show_right_of(self.main_window)
 
+    def _on_settings_closed(self):
+        """设置窗关闭后的计时处理。
+
+        - 间隔没改（含"改了但没点保存就关窗"）→ 从冻结处继续计时；
+        - 间隔改了并已保存 → apply_settings 里已按新间隔从头重算，这里不再动。
+        """
+        if self._exiting:
+            return
+        if not self._settings_interval_changed:
+            # resume() 对"本来就是运行中"的状态是空操作，安全
+            self.timer.resume()
+        self._settings_interval_changed = False
+        self._sync_pause_state()
+
     def apply_settings(self, interval_seconds: int, autostart: bool):
+        old_interval = int(self.cfg["interval_seconds"])
         self.cfg["interval_seconds"] = interval_seconds
         self.cfg["autostart"] = autostart
         if save_config(self.cfg):
             log.info("配置已保存")
-        self.timer.set_interval(interval_seconds)
+        if interval_seconds != old_interval:
+            # 间隔变了：按新间隔从完整时长重新开始计时
+            self.timer.set_interval(interval_seconds)
+            self._settings_interval_changed = True
+            log.info("提醒间隔 %s → %s 秒，已按新间隔重新计时",
+                     old_interval, interval_seconds)
+        else:
+            # 间隔未变：不碰计时器（保持冻结），关窗时从暂停处继续
+            log.info("提醒间隔未变，计时保持冻结，关窗后继续")
+        self._sync_pause_state()
         if autostart:
             log.info("「开机自启」偏好已记录，具体写入逻辑待实现（FR-7）")
 
@@ -213,6 +247,7 @@ class QtController:
         win.show_beside(self.main_window)
 
     def do_exit(self):
+        self._exiting = True
         if self.tray is not None:
             self.tray.hide()
         self._qapp.quit()
