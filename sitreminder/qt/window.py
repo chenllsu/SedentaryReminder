@@ -25,15 +25,32 @@ from .qtheme import make_time_font
 
 log = logging.getLogger(__name__)
 
-IMG_W, IMG_H = 150, 150
-SHADOW_PAD = 16
-# 窗口加高：上方留 16 放猫阴影，猫图占 16..166，下方额外留出独立的胶囊停靠带，
-# 保证胶囊完整态顶部(≈164)落在猫身可视轮廓(≈155)之下、不再遮住妮子。
-WIN_W, WIN_H = IMG_W + SHADOW_PAD * 2, 200
+# ---------------------------------------------------------------- 尺寸
+# 妮子逻辑显示边长(px)。调小 = 形象更小巧、更不打扰；窗口尺寸随之联动。
+# 110 = 龙哥 2026-09-10 从 150/130/120/110 对比图中选定。
+MASCOT_SIZE = 110
+IMG_W = IMG_H = MASCOT_SIZE
+SHADOW_PAD = 16   # 四周留给投影的透明边距
 
-CAPSULE_W, CAPSULE_H = 150, 48
+# 妮子「可见底部」占图高的比例。素材 alpha 包围盒实测：内容底 480 / 画布 512 = 0.9375
+# （猫图上沿约在 4% 处、脚下约在 93.7% 处，其余是透明留白）。
+# 胶囊停靠位置由它推导，因此改 MASCOT_SIZE 时不必再手算窗口高度。
+MASCOT_VISIBLE_BOTTOM_RATIO = 0.9375
+CAPSULE_GAP_BELOW_CAT = 8   # 胶囊完整态顶部与猫脚之间的空隙
+
 CAPSULE_BODY_W, CAPSULE_BODY_H = 116, 30
 CAPSULE_BOTTOM_PAD = 6   # 完整态胶囊底边距窗口下缘的像素（避免底部被窗口裁切）
+
+# 窗口高度 = 上留白 + 猫脚位置 + 空隙 + 胶囊高 + 下留白。
+# 这样胶囊永远落在猫脚之下（不遮妮子），且不留多余空白。
+WIN_W = IMG_W + SHADOW_PAD * 2
+WIN_H = int(round(
+    SHADOW_PAD
+    + IMG_H * MASCOT_VISIBLE_BOTTOM_RATIO
+    + CAPSULE_GAP_BELOW_CAT
+    + CAPSULE_BODY_H
+    + CAPSULE_BOTTOM_PAD
+))
 
 # 胶囊动画参数 —— 时间驱动补间，时长以毫秒计；easeOutCubic 缓出(出现)、easeInCubic 缓入(消失)
 CAPSULE_ANIM_MS_IN = 220      # 出现动画时长
@@ -41,20 +58,64 @@ CAPSULE_ANIM_MS_OUT = 180     # 消失动画时长
 CAPSULE_ANIM_INTERVAL_MS = 15
 
 
-def _load_scaled_mascot() -> QPixmap | None:
-    # 优先用去色晕版（Qt 真透明下保留这个版本的边缘 alpha，不再有"白边鬼影"）
+def _mascot_source_image() -> QImage | None:
+    """按优先级取妮子原图（都是高分辨率，供按需缩放）。
+
+    优先去色晕的 Qt 版（512px，透明区 RGB 已归零），降级用 1920 通用版。
+    """
     for path in (paths.MASCOT_PATH_QT, paths.MASCOT_PATH):
         if not os.path.exists(path):
             continue
         img = QImage(path)
-        if img.isNull():
-            continue
-        # 朝向约定：以素材原始方向为准（= 用户选定的 B 朝向），不再镜像。
-        # 主浮窗与托盘图标共用该方向，保持一致。
-        pm = QPixmap.fromImage(img)
-        return pm.scaled(IMG_W, IMG_H, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        if not img.isNull():
+            return img
     log.warning("形象资源缺失（%s / %s）", paths.MASCOT_PATH_QT, paths.MASCOT_PATH)
     return None
+
+
+def load_mascot_pixmap(logical_size: int, dpr: float = 1.0) -> QPixmap | None:
+    """生成妮子位图：按「逻辑尺寸 × 屏幕缩放」取物理像素，并标注 devicePixelRatio。
+
+    为什么必须这样做（原本发虚的根因）：
+      屏幕 125% 缩放时，Qt 要把 150 逻辑像素的绘制栅格化成 187.5 物理像素。
+      若位图只有 150 物理像素，等于被放大 1.25 倍 → 边缘发虚。
+      这里改为直接产出 187 物理像素、并 setDevicePixelRatio(1.25) 告知 Qt，
+      Qt 绘制到 150 逻辑矩形时正好 1:1，不再缩放 → 清晰。
+    """
+    img = _mascot_source_image()
+    if img is None:
+        return None
+    dpr = max(1.0, float(dpr))
+    phys = max(1, int(round(logical_size * dpr)))
+    src = QPixmap.fromImage(img)
+    # 高清源 → 物理像素：这是"缩小"，用平滑插值；配合预乘 alpha 素材不会渗白边。
+    pm = src.scaled(phys, phys, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    pm.setDevicePixelRatio(dpr)
+    return pm
+
+
+def _load_scaled_mascot() -> QPixmap | None:
+    """主浮窗用：按当前主屏缩放比例加载妮子位图。"""
+    return load_mascot_pixmap(IMG_W, current_device_pixel_ratio())
+
+
+def current_device_pixel_ratio(widget=None) -> float:
+    """取屏幕缩放比例（如 Windows 125% → 1.25）。取不到时按 1.0 处理。"""
+    from PySide6.QtWidgets import QApplication
+    scr = None
+    if widget is not None:
+        try:
+            scr = widget.screen()
+        except Exception:
+            scr = None
+    if scr is None:
+        scr = QApplication.primaryScreen()
+    if scr is None:
+        return 1.0
+    try:
+        return float(scr.devicePixelRatio()) or 1.0
+    except Exception:
+        return 1.0
 
 
 class SitReminderWindow(QWidget):
@@ -71,11 +132,10 @@ class SitReminderWindow(QWidget):
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.setFixedSize(WIN_W, WIN_H)
 
-        self._mascot = _load_scaled_mascot()
-        # 真 alpha 阴影层：保留猫的 alpha 轮廓，仅把 RGB 换成深色。
-        # 用它逐层偏移叠加 → 得到贴猫轮廓的真羽化投影（无 1-bit 二值硬边，
-        # 浅色桌面上不会再生出"灰白描边/锯齿边"）。
-        self._shadow_layer = self._make_shadow_layer()
+        self._mascot = None
+        self._shadow_layer = None
+        self._dpr = current_device_pixel_ratio(self)
+        self._reload_mascot()
         # 胶囊动画进度：0.0 = 完全隐藏，1.0 = 完全显示
         # 时间驱动补间：_cap_anim_t0 = 动画开始时的单调时钟(ms)
         self._cap_progress = 0.0
@@ -96,6 +156,24 @@ class SitReminderWindow(QWidget):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._on_tick)
         self._timer.start(250)
+
+    # ------------------------------------------------------------ 素材（高 DPI）
+    def _reload_mascot(self):
+        """按当前 DPR 重新生成妮子位图与阴影底片。"""
+        self._mascot = load_mascot_pixmap(IMG_W, self._dpr)
+        # 真 alpha 阴影层：保留猫的 alpha 轮廓，仅把 RGB 换成深色。
+        # 逐层偏移叠加即得贴猫轮廓的真羽化投影（无 1-bit 二值硬边）。
+        self._shadow_layer = self._make_shadow_layer()
+
+    def showEvent(self, e):
+        # 窗口首次上屏 / 跨屏移动后，若屏幕缩放比例变了，按新 DPR 重载素材，
+        # 保证任何显示器上都是 1:1 物理像素（否则在 150% 屏上又会发虚）。
+        super().showEvent(e)
+        dpr = current_device_pixel_ratio(self)
+        if abs(dpr - self._dpr) > 1e-6:
+            self._dpr = dpr
+            self._reload_mascot()
+            self.update()
 
     # ------------------------------------------------------------ 菜单
     def _build_menu(self):
@@ -191,23 +269,31 @@ class SitReminderWindow(QWidget):
             self._paint_capsule(p)
 
     def _make_shadow_layer(self):
-        """由彩色猫图生成一张「深色 + 保留 alpha」的阴影底片。
+        """由妮子位图生成一张「深色 + 保留 alpha」的阴影底片。
 
         阴影绘制时用 setOpacity 压层即可得到多层羽化；因为 alpha 是逐像素
         真渐变（不是 createHeuristicMask 的 1-bit 二值），外圈随猫 alpha 自然
         淡出，不会在浅色桌面上形成硬边描边。
+
+        用字节级改写代替逐像素 pixelColor/setPixelColor：Format_ARGB32 每像素
+        4 字节（小端序下为 B,G,R,A），只覆盖 BGR、保留 A，速度快一个量级。
         """
         if self._mascot is None:
             return None
         img = self._mascot.toImage().convertToFormat(QImage.Format_ARGB32)
         w, h = img.width(), img.height()
-        for y in range(h):
-            for x in range(w):
-                c = img.pixelColor(x, y)
-                a = c.alpha()
-                if a:
-                    img.setPixelColor(x, y, QColor(20, 18, 24, a))
-        return QPixmap.fromImage(img)
+        mv = img.bits()             # 可写内存视图，长度 = w*h*4
+        # 阴影色 (20, 18, 24) 的 B,G,R 字节
+        b_sh, g_sh, r_sh = 24, 18, 20
+        for i in range(0, w * h * 4, 4):
+            mv[i] = b_sh
+            mv[i + 1] = g_sh
+            mv[i + 2] = r_sh
+            # mv[i + 3] 是 alpha，保持原样
+        pm = QPixmap.fromImage(img)
+        # 关键：阴影底片必须与猫图同 DPR，否则 drawPixmap 会按 1:1 画 → 错位。
+        pm.setDevicePixelRatio(self._mascot.devicePixelRatio())
+        return pm
 
     def _paint_drop_shadow(self, p: QPainter):
         """真 alpha 羽化投影：把深色猫影往右下逐层偏移、降透明度叠加。

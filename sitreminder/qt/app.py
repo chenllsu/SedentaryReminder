@@ -86,12 +86,19 @@ class QtController:
             self.show_main()
 
     def _load_tray_icon(self) -> QIcon:
-        # 复用主浮窗同款素材与朝向（B 朝向），保证托盘小图标与主窗方向一致
-        from .window import _load_scaled_mascot
-        pm = _load_scaled_mascot()
-        if pm is not None:
-            return QIcon(pm.scaled(64, 64, Qt.KeepAspectRatio,
-                                   Qt.SmoothTransformation))
+        """托盘图标：复用主浮窗同款素材与朝向（B 朝向），保证方向一致。
+
+        从高清源一次性生成多档尺寸塞进 QIcon，让系统按托盘实际像素挑选，
+        避免"小图被放大"导致的糊边。
+        """
+        from .window import load_mascot_pixmap
+        src = load_mascot_pixmap(256, 1.0)      # 256 物理像素的高清源
+        if src is not None:
+            icon = QIcon()
+            for s in (16, 20, 24, 32, 48, 64, 128, 256):
+                icon.addPixmap(src.scaled(s, s, Qt.KeepAspectRatio,
+                                          Qt.SmoothTransformation))
+            return icon
         # 降级：1920 原图
         p = paths.MASCOT_PATH
         if os.path.exists(p):

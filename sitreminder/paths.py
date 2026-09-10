@@ -26,7 +26,10 @@ ASSET_DIR = os.path.join(getattr(sys, "_MEIPASS", BASE_DIR) if IS_FROZEN else BA
 
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 MASCOT_PATH = os.path.join(ASSET_DIR, "nizi_clean.png")
-MASCOT_PATH_QT = os.path.join(ASSET_DIR, "nizi_clean_qt.png")  # 去色晕版（Qt 用）
+# Qt 用去色晕版：透明区 RGB 已归零、预乘 alpha 缩放，避免边缘渗白。
+# 分辨率 512×512 —— 高 DPI 屏（125%/150%）下按「逻辑尺寸×缩放比」取物理像素时
+# 仍有充足余量，不会因放大而发虚。
+MASCOT_PATH_QT = os.path.join(ASSET_DIR, "nizi_clean_qt.png")
 ICON_PATH = os.path.join(ASSET_DIR, "icon.ico")
 
 

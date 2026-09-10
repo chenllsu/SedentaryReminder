@@ -44,15 +44,10 @@ def main():
     app = QApplication(sys.argv)
     screen = app.primaryScreen().availableGeometry()
 
-    # 1) 加载去色晕版素材
+    # 1) 加载去色晕版素材（走主窗同一条 HiDPI 加载路径，朝向=素材原方向 B，不再镜像）
     from PySide6.QtGui import QImage, QIcon
-    img = QImage(P.MASCOT_PATH_QT if os.path.exists(P.MASCOT_PATH_QT) else P.MASCOT_PATH)
-    if not img.isNull():
-        img = img.mirrored(True, False)
-        mascot_pm = QPixmap.fromImage(img).scaled(
-            150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-    else:
-        mascot_pm = None
+    from sitreminder.qt import window as W
+    mascot_pm = W.load_mascot_pixmap(W.IMG_W, 1.0)
 
     # 2) 一张大画布：浅灰主色 + 蓝/深色色块做"桌面"对比
     canvas = QPixmap(900, 540)
@@ -74,8 +69,8 @@ def main():
     p.drawText(620, 30, "浅色桌面")
 
     # 3) 在三块背景上各画一只猫（带阴影），验证去色晕后的真实外观
-    IMG_W = IMG_H = 150
-    PAD = 16
+    IMG_W, IMG_H = W.IMG_W, W.IMG_H
+    PAD = W.SHADOW_PAD
     for cx_bg, base_x in [(0, 90), (300, 390), (600, 690)]:
         # 阴影（多圈 QColor alpha）
         for pen_w, col in ((10, QColor(20, 18, 24, 10)),
@@ -96,7 +91,7 @@ def main():
     # 4) 画悬停胶囊
     for base_x in (90, 390, 690):
         cx = base_x + PAD + IMG_W / 2.0
-        rect_w, rect_h = 116, 30
+        rect_w, rect_h = W.CAPSULE_BODY_W, W.CAPSULE_BODY_H
         cy = 4.0
         rect = QtCore.QRectF(cx - rect_w/2, cy, rect_w, rect_h)
         path = QPainterPath()
@@ -105,7 +100,7 @@ def main():
         p.setPen(QPen(QColor(255, 255, 255, 26), 1))
         p.drawPath(path)
         p.setPen(qtheme.CAPSULE_TEXT)
-        p.setFont(make_time_font(14))
+        p.setFont(make_time_font(qtheme.FONT_TIME))
         p.drawText(rect, Qt.AlignCenter, "29:42")
 
     p.end()
