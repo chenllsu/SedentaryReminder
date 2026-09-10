@@ -18,6 +18,7 @@ MAX_INTERVAL_SECONDS = 36000             # 上限 600 分钟（与设置窗口�
 DEFAULT_CONFIG: Dict[str, Any] = {
     "interval_seconds": DEFAULT_INTERVAL_SECONDS,
     "autostart": False,
+    "window_pos": None,          # [x, y] 浮窗最后位置；None = 从未记录（首次启动）
 }
 
 
@@ -28,6 +29,23 @@ def clamp_interval(seconds: Any) -> int:
     except (TypeError, ValueError):
         value = DEFAULT_INTERVAL_SECONDS
     return max(MIN_INTERVAL_SECONDS, min(MAX_INTERVAL_SECONDS, value))
+
+
+def sanitize_window_pos(raw: Any):
+    """把窗口位置收敛为 [x, y]；缺失或非法 → None。
+
+    返回 None 是有意义的语义：表示「用户还没拖过窗口」，
+    调用方据此走首次启动的默认位置（屏幕右下角）。
+
+    统一返回 list（而非 tuple）：save_config 写出的就是 JSON 数组，
+    读回来保持一致，调用方才能用 == 判断"位置未变、无需重复写盘"。
+    """
+    if isinstance(raw, (list, tuple)) and len(raw) == 2:
+        try:
+            return [int(raw[0]), int(raw[1])]
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def load_config(path: str = None) -> Dict[str, Any]:
@@ -57,6 +75,7 @@ def load_config(path: str = None) -> Dict[str, Any]:
             raw.get("interval_seconds", DEFAULT_INTERVAL_SECONDS)
         ),
         "autostart": bool(raw.get("autostart", False)),
+        "window_pos": sanitize_window_pos(raw.get("window_pos")),
     }
 
 

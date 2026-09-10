@@ -51,9 +51,21 @@ class ConfigTests(unittest.TestCase):
     def test_save_and_reload_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "config.json")
-            payload = {"interval_seconds": 1200, "autostart": True}
+            payload = {"interval_seconds": 1200, "autostart": True,
+                       "window_pos": [880, 460]}
             self.assertTrue(config.save_config(payload, path))
             self.assertEqual(config.load_config(path), payload)
+
+    def test_window_pos_is_none_when_absent_or_invalid(self):
+        """位置缺失/非法 → None，表示"首次启动"，由界面走默认右下角。"""
+        cfg = config.load_config(os.path.join(tempfile.gettempdir(), "no_such_cfg.json"))
+        self.assertIsNone(cfg["window_pos"])
+        self.assertIsNone(config.sanitize_window_pos(None))
+        self.assertIsNone(config.sanitize_window_pos([1]))
+        self.assertIsNone(config.sanitize_window_pos("12,34"))
+        self.assertIsNone(config.sanitize_window_pos(["a", "b"]))
+        # 统一返回 list（与写盘的 JSON 数组一致），否则"未变则不写盘"会失效
+        self.assertEqual(config.sanitize_window_pos((3, 4)), [3, 4])
 
 
 class TimerTests(unittest.TestCase):

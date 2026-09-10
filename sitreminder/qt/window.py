@@ -15,7 +15,7 @@ import time
 
 from PySide6.QtCore import Qt, QTimer, QRectF, QPoint
 from PySide6.QtGui import (
-    QPainter, QPainterPath, QPixmap, QImage, QColor, QPen, QRegion,
+    QPainter, QPainterPath, QPixmap, QImage, QColor, QPen, QRegion, QTransform,
 )
 from PySide6.QtWidgets import QWidget, QMenu
 
@@ -40,6 +40,11 @@ CAPSULE_GAP_BELOW_CAT = 8   # 胶囊完整态顶部与猫脚之间的空隙
 
 CAPSULE_BODY_W, CAPSULE_BODY_H = 116, 30
 CAPSULE_BOTTOM_PAD = 6   # 完整态胶囊底边距窗口下缘的像素（避免底部被窗口裁切）
+
+# 形象朝向：True = 水平翻转（左右对调，等价于绕竖直轴转 180°）。
+# 主浮窗与托盘图标共用 load_mascot_pixmap()，改这一处两边同步生效。
+# 2026-09-10 龙哥要求：妮子卡通形象 + 系统托盘图标统一水平翻转。
+MASCOT_MIRROR = True
 
 # 窗口高度 = 上留白 + 猫脚位置 + 空隙 + 胶囊高 + 下留白。
 # 这样胶囊永远落在猫脚之下（不遮妮子），且不留多余空白。
@@ -85,6 +90,10 @@ def load_mascot_pixmap(logical_size: int, dpr: float = 1.0) -> QPixmap | None:
     img = _mascot_source_image()
     if img is None:
         return None
+    # 朝向：水平翻转（左右对调）。放在缩放之前，变换与等比缩放互不影响。
+    # 主窗与托盘图标都经过本函数，因此镜像一次即两处同步。
+    if MASCOT_MIRROR:
+        img = img.transformed(QTransform().scale(-1, 1))
     dpr = max(1.0, float(dpr))
     phys = max(1, int(round(logical_size * dpr)))
     src = QPixmap.fromImage(img)
@@ -355,8 +364,12 @@ class SitReminderWindow(QWidget):
             self.move(self._press_win + delta)
 
     def mouseReleaseEvent(self, e):
-        if e.button() == Qt.LeftButton and not self._dragging:
-            self.ctrl.open_settings()
+        if e.button() == Qt.LeftButton:
+            if self._dragging:
+                # 拖动结束：记下最后位置，下次启动回到这里（而不是固定坐标）
+                self.ctrl.save_window_pos(self.pos())
+            else:
+                self.ctrl.open_settings()
         self._press_global = None
         self._dragging = False
 
