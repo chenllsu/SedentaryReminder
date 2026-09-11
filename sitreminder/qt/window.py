@@ -5,7 +5,12 @@
 
 v0.4 改造：
   - 阴影改为「猫图 alpha 蒙版 + 多圈半透明」自绘，自动贴猫毛、不再有矩形方框
-  - 倒计时胶囊移到猫下方，进出有过渡动画（滑入+淡入 / 滑出+淡出）
+  - 倒计时胶囊移到猫下方
+
+v0.5 改造：
+  - 胶囊由「悬停才出现」改为「常驻显示」：平时半透明淡显（不抢视线），
+    鼠标移入窗口即变为完全清晰；淡显↔清晰之间做平滑补间
+  - 暂停时胶囊转琥珀底色 + 文字前带暂停标记，无需打开菜单就能看出是停着的
 """
 from __future__ import annotations
 
@@ -13,7 +18,7 @@ import logging
 import os
 import time
 
-from PySide6.QtCore import Qt, QTimer, QRectF, QPoint
+from PySide6.QtCore import Qt, QTimer, QRectF, QPoint, QPointF
 from PySide6.QtGui import (
     QPainter, QPainterPath, QPixmap, QImage, QColor, QPen, QRegion, QTransform,
 )
@@ -38,8 +43,19 @@ SHADOW_PAD = 16   # 四周留给投影的透明边距
 MASCOT_VISIBLE_BOTTOM_RATIO = 0.9375
 CAPSULE_GAP_BELOW_CAT = 8   # 胶囊完整态顶部与猫脚之间的空隙
 
-CAPSULE_BODY_W, CAPSULE_BODY_H = 116, 30
-CAPSULE_BOTTOM_PAD = 6   # 完整态胶囊底边距窗口下缘的像素（避免底部被窗口裁切）
+# v0.6「爪印贴纸」紧凑化：CAPSULE_BODY_* 指"内芯"尺寸，白色剪纸外框再外扩
+# CAPSULE_STICKER_PAD。爪印图标 + 数字把内芯填满，不再有大段空白。
+CAPSULE_BODY_W, CAPSULE_BODY_H = 72, 20
+CAPSULE_STICKER_PAD = 3   # 白色剪纸外框厚度
+CAPSULE_PAW_BOX = 11      # 爪印图标占位宽
+CAPSULE_PAW_GAP = 4       # 爪印与数字的间距
+CAPSULE_BOTTOM_PAD = 7   # 完整态贴纸外沿底边距窗口下缘的像素（避免底部被窗口裁切）
+
+# 胶囊常驻显示（v0.5）：不再"悬停才出现"，而是长期挂在猫脚下。
+# 平时用较低不透明度淡显（不抢视线），鼠标移入即恢复清晰。
+# 暂停时强制清晰并转琥珀底色（见 _paint_capsule），确保"停着"一眼可辨。
+CAPSULE_IDLE_ALPHA = 0.42    # 平时（未悬停、未暂停）的不透明度
+CAPSULE_FULL_ALPHA = 1.0     # 悬停 / 暂停时的不透明度
 
 # 形象朝向：True = 水平翻转（左右对调，等价于绕竖直轴转 180°）。
 # 主浮窗与托盘图标共用 load_mascot_pixmap()，改这一处两边同步生效。
@@ -57,9 +73,10 @@ WIN_H = int(round(
     + CAPSULE_BOTTOM_PAD
 ))
 
-# 胶囊动画参数 —— 时间驱动补间，时长以毫秒计；easeOutCubic 缓出(出现)、easeInCubic 缓入(消失)
-CAPSULE_ANIM_MS_IN = 220      # 出现动画时长
-CAPSULE_ANIM_MS_OUT = 180     # 消失动画时长
+# 胶囊不透明度补间参数 —— 时长以毫秒计；
+# 变清晰用 easeOutCubic(缓出)、变淡用 easeInCubic(缓入)
+CAPSULE_ANIM_MS_IN = 220      # 淡显 → 清晰 的时长
+CAPSULE_ANIM_MS_OUT = 180     # 清晰 → 淡显 的时长
 CAPSULE_ANIM_INTERVAL_MS = 15
 
 
@@ -145,16 +162,21 @@ class SitReminderWindow(QWidget):
         self._shadow_layer = None
         self._dpr = current_device_pixel_ratio(self)
         self._reload_mascot()
-        # 胶囊动画进度：0.0 = 完全隐藏，1.0 = 完全显示
-        # 时间驱动补间：_cap_anim_t0 = 动画开始时的单调时钟(ms)
+        # 胶囊不透明度补间：_cap_progress = 当前不透明度，_cap_target = 目标值。
+        # v0.5 起胶囊**常驻**（不再有"收起"状态），这里只负责「淡显 ↔ 清晰」的
+        # 平滑过渡，不再控制出现/消失。
+        # 时间驱动补间：_cap_anim_t0 = 动画开始时的单调时钟(秒)
         self._cap_progress = 0.0
-        self._cap_target = 0.0   # 0.0 收起 / 1.0 显示
+        self._cap_target = CAPSULE_IDLE_ALPHA
         self._cap_anim_t0 = 0.0
-        self._cap_anim_from = 0.0  # 本次动画起始进度
+        self._cap_anim_from = 0.0  # 本次动画起始不透明度
         self._cap_anim = QTimer(self)
         self._cap_anim.setInterval(CAPSULE_ANIM_INTERVAL_MS)
         self._cap_anim.timeout.connect(self._step_capsule_anim)
         self._hover = False
+        # 贴纸显示模式：True = 常驻淡显（默认）；False = 悬停/暂停才出现。
+        # 由控制器按配置在构建后调 set_capsule_always() 注入。
+        self._capsule_always = True
         self._time_text = ""
 
         self._press_global: QPoint | None = None
@@ -165,6 +187,11 @@ class SitReminderWindow(QWidget):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._on_tick)
         self._timer.start(250)
+
+        # 常驻胶囊：入口先把文字填好（否则首帧是空胶囊），
+        # 再启动一次补间，让它从全透明淡入到"平时"的淡显不透明度。
+        self._refresh_time_text()
+        self._start_capsule_anim()
 
     # ------------------------------------------------------------ 素材（高 DPI）
     def _reload_mascot(self):
@@ -196,17 +223,62 @@ class SitReminderWindow(QWidget):
 
     def set_paused(self, paused: bool):
         self.act_pause.setText("继续计时" if paused else "暂停计时")
+        # 暂停时贴纸必须清晰可见（琥珀底 + 爪印变色），不能被"平时淡显"压暗。
+        self._sync_capsule_alpha()
+
+    def set_capsule_always(self, always: bool):
+        """切换贴纸显示模式（设置窗保存后由控制器调用）。
+
+        常驻 = 平时淡显挂着；非常驻 = 平时完全隐藏，仅悬停/暂停时出现。
+        暂停态在两种模式下都会现身（重要的状态提示不该被藏掉）。
+        """
+        always = bool(always)
+        if always == self._capsule_always:
+            return
+        self._capsule_always = always
+        self._sync_capsule_alpha()
+
+    def _alpha_target(self) -> float:
+        """胶囊目标不透明度。
+
+        暂停中或鼠标悬停 → 清晰（两种模式一致）；
+        其余情况：常驻模式淡显，非常驻模式完全隐藏。
+        暂停状态一律以计时器为准（唯一真相源）。窗口若自己再缓存一份，
+        一旦某条路径只改了计时器没通知窗口，就会出现"底色变了但淡显没跟上"
+        或反过来的精神分裂现象。
+        """
+        if self.ctrl.timer.is_paused or self._hover:
+            return CAPSULE_FULL_ALPHA
+        return CAPSULE_IDLE_ALPHA if self._capsule_always else 0.0
+
+    def _sync_capsule_alpha(self):
+        """按当前状态更新胶囊目标不透明度；确有变化才启动补间。"""
+        target = self._alpha_target()
+        if abs(target - self._cap_target) < 1e-9:
+            return
+        self._cap_target = target
+        self._start_capsule_anim()
 
     # ------------------------------------------------------------ 计时
+    def _refresh_time_text(self):
+        """按当前剩余时间刷新胶囊文字。
+
+        v0.6 起暂停不再用文字 ⏸ 后缀表达，改由贴纸底色转琥珀承担
+        （见 _paint_capsule），文字保持纯数字、更紧凑。
+        """
+        t = self.ctrl.timer
+        m, s = divmod(t.remaining(), 60)
+        self._time_text = f"{m:02d}:{s:02d}"
+
     def _on_tick(self):
-        if self._hover and self._cap_progress > 0:
-            t = self.ctrl.timer
-            m, s = divmod(t.remaining(), 60)
-            suffix = " ⏸" if t.is_paused else ""
-            text = f"{m:02d}:{s:02d}{suffix}"
-            if text != self._time_text:
-                self._time_text = text
-                self.update()
+        # 常驻显示：不再要求"正在悬停"，每次 tick 都刷新
+        old = self._time_text
+        self._refresh_time_text()
+        # 兜底：暂停状态可能由别处改变（托盘/菜单/气泡），这里顺带校准一次
+        # 胶囊不透明度，保证底色与淡显始终一致。
+        self._sync_capsule_alpha()
+        if self._time_text != old:
+            self.update()
         if self.ctrl.timer.is_due():
             self.ctrl.on_due()
 
@@ -233,11 +305,11 @@ class SitReminderWindow(QWidget):
         相比旧的「对当前 progress 递归 ease + step*1.5」算法，
         这里 progress 是 t 的平滑函数，全程无跳变，动画更丝滑。
         """
-        entering = self._cap_target > self._cap_progress
+        entering = self._cap_target > self._cap_progress   # True = 正在变清晰
         duration = CAPSULE_ANIM_MS_IN if entering else CAPSULE_ANIM_MS_OUT
         t_raw = (time.monotonic() - self._cap_anim_t0) * 1000.0 / duration
         t = max(0.0, min(1.0, t_raw))
-        # 曲线：出现用缓出(先快后慢)，消失用缓入(先慢后快)
+        # 曲线：变清晰用缓出(先快后慢)，变淡用缓入(先慢后快)
         eased = self._ease_out_cubic(t) if entering else self._ease_in_cubic(t)
         # 从本次动画起点 _cap_anim_from 平滑逼近目标，避免改向时跳变
         self._cap_progress = self._cap_anim_from + (self._cap_target - self._cap_anim_from) * eased
@@ -246,21 +318,17 @@ class SitReminderWindow(QWidget):
             self._cap_anim.stop()
         self.update()
 
-    def _capsule_rect_animated(self) -> QRectF:
-        """计算胶囊本次绘制的矩形。
+    def _capsule_rect(self) -> QRectF:
+        """胶囊矩形（常驻完整态，尺寸与位置恒定）。
 
-        完整态(progress=1)底部固定对齐窗口下缘内侧留 pad；高度随 progress 增长。
-        底部 y 恒定(始终在窗口内、不会被裁)，胶囊像从停靠带原地长高，姿态稳定。
-        由于窗口已加高到 200，完整态顶部落在猫身可视轮廓之下，不再遮住妮子。
+        v0.5 起胶囊不再"长大/收起"，因此这里与不透明度无关：水平居中、
+        底部对齐窗口下缘内侧留 pad。窗口高度本就是按「猫脚 + 空隙 + 胶囊高」
+        推导出来的，所以胶囊始终完整落在猫身下方，既不遮妮子也不被裁切。
         """
         cx = WIN_W / 2.0
-        h = CAPSULE_BODY_H * self._cap_progress
-        # 胶囊完整态底部固定：窗口下缘向上留 CAPSULE_BOTTOM_PAD
         bottom = WIN_H - CAPSULE_BOTTOM_PAD
-        # 滑入感：进度低时胶囊略靠下，随进度上移到停靠位（幅度小、平滑）
-        y = bottom - h - (1 - self._cap_progress) * 8
-        return QRectF(cx - CAPSULE_BODY_W / 2, y,
-                      CAPSULE_BODY_W, h)
+        return QRectF(cx - CAPSULE_BODY_W / 2, bottom - CAPSULE_BODY_H,
+                      CAPSULE_BODY_W, CAPSULE_BODY_H)
 
     # ------------------------------------------------------------ 绘制
     def paintEvent(self, event):
@@ -273,8 +341,9 @@ class SitReminderWindow(QWidget):
             self._paint_drop_shadow(p)
             p.drawPixmap(SHADOW_PAD, SHADOW_PAD, self._mascot)
 
-        # 胶囊：悬停时绘制，根据 _cap_progress 控制位置/大小/透明度
-        if self._cap_progress > 0.01 and self._time_text:
+        # 胶囊：常驻绘制；_cap_progress 即其当前不透明度
+        # （平时淡显 / 悬停与暂停时清晰），淡入过程中会从 0 平滑上升。
+        if self._time_text and self._cap_progress > 0.01:
             self._paint_capsule(p)
 
     def _make_shadow_layer(self):
@@ -322,28 +391,68 @@ class SitReminderWindow(QWidget):
             p.restore()
 
     def _paint_capsule(self, p: QPainter):
-        rect = self._capsule_rect_animated()
-        # 透明度由胶囊颜色 alpha 表达
-        alpha = max(0, min(255, int(self._cap_progress * 255)))
-        bg = qtheme.CAPSULE_BG
-        bg.setAlpha(alpha)
-        text_col = QColor(qtheme.CAPSULE_TEXT)
-        text_col.setAlpha(alpha)
-        border_col = QColor(255, 255, 255, int(26 * self._cap_progress))
+        """绘制常驻倒计时贴纸（v0.6「爪印贴纸」）。
 
-        path = QPainterPath()
-        # 圆角 = 半高（胶囊型）
-        radius = CAPSULE_BODY_H * self._cap_progress / 2
-        path.addRoundedRect(rect, radius, radius)
-        p.fillPath(path, bg)
-        p.setPen(QPen(border_col, 1))
-        p.drawPath(path)
-        # 文字：胶囊 progress 太低时不画（< 0.3）避免模糊
+        不透明度由 _cap_progress 表达：平时淡显、悬停与暂停时清晰。
+        结构：白色剪纸外框（贴纸感）→ 内芯（奶米/琥珀）→ 爪印图标 + 数字。
+        暂停时内芯转琥珀、爪印与文字转深琥珀，"停着"一眼可辨。
+        """
+        inner = self._capsule_rect()
+        alpha = max(0, min(255, int(self._cap_progress * 255)))
+        paused = self.ctrl.timer.is_paused
+
+        # 全部颜色先拷贝再改 alpha：qtheme 里的 QColor 是模块级共享对象，
+        # 直接 setAlpha 会污染其他使用方。
+        edge = QColor(qtheme.CAPSULE_STICKER_EDGE)
+        bg = QColor(qtheme.CAPSULE_PAUSED_BG if paused else qtheme.CAPSULE_CREAM_BG)
+        border = QColor(qtheme.CAPSULE_PAUSED_BORDER if paused
+                        else qtheme.CAPSULE_CREAM_BORDER)
+        text_col = QColor(qtheme.CAPSULE_PAUSED_TEXT if paused
+                          else qtheme.CAPSULE_TEXT_BROWN)
+        paw_col = QColor(qtheme.CAPSULE_PAUSED_TEXT if paused
+                         else qtheme.CAPSULE_PAW)
+        for c in (edge, bg, border, text_col, paw_col):
+            c.setAlpha(alpha)
+
+        # 白色剪纸外框：内芯四周外扩 CAPSULE_STICKER_PAD，圆角随外框高度
+        outer = inner.adjusted(-CAPSULE_STICKER_PAD, -CAPSULE_STICKER_PAD,
+                               CAPSULE_STICKER_PAD, CAPSULE_STICKER_PAD)
+        outer_path = QPainterPath()
+        outer_path.addRoundedRect(outer, outer.height() / 2, outer.height() / 2)
+        p.fillPath(outer_path, edge)
+
+        # 内芯
+        inner_path = QPainterPath()
+        inner_path.addRoundedRect(inner, inner.height() / 2, inner.height() / 2)
+        p.fillPath(inner_path, bg)
+        p.setPen(QPen(border, 1))
+        p.drawPath(inner_path)
+
         if self._cap_progress > 0.3 and self._time_text:
+            # 爪印图标：垂直居中、贴左
+            self._paint_paw(p, paw_col,
+                            inner.left() + 4.0 + CAPSULE_PAW_BOX / 2,
+                            inner.center().y())
+            # 数字：爪印右侧剩余区域居中
+            text_rect = inner.adjusted(CAPSULE_PAW_BOX + CAPSULE_PAW_GAP, 0, 0, 0)
             p.setPen(text_col)
-            f = make_time_font()
-            p.setFont(f)
-            p.drawText(rect, Qt.AlignCenter, self._time_text)
+            p.setFont(make_time_font())
+            p.drawText(text_rect, Qt.AlignCenter, self._time_text)
+
+    def _paint_paw(self, p: QPainter, color: QColor, cx: float, cy: float):
+        """以 (cx, cy) 为中心画一枚约 11×11 的猫爪印（主肉垫 + 四趾）。"""
+        p.save()
+        p.setPen(Qt.NoPen)
+        p.setBrush(color)
+        s = CAPSULE_PAW_BOX / 11.0
+        # 主肉垫
+        p.drawEllipse(QPointF(cx, cy + 2.2 * s), 3.6 * s, 2.9 * s)
+        # 四趾：左 → 右
+        p.drawEllipse(QPointF(cx - 4.2 * s, cy - 2.6 * s), 1.5 * s, 1.5 * s)
+        p.drawEllipse(QPointF(cx - 1.4 * s, cy - 3.9 * s), 1.5 * s, 1.5 * s)
+        p.drawEllipse(QPointF(cx + 1.6 * s, cy - 3.7 * s), 1.5 * s, 1.5 * s)
+        p.drawEllipse(QPointF(cx + 4.3 * s, cy - 2.0 * s), 1.4 * s, 1.4 * s)
+        p.restore()
 
     # ------------------------------------------------------------ 交互
     def mousePressEvent(self, e):
@@ -373,19 +482,15 @@ class SitReminderWindow(QWidget):
 
     def enterEvent(self, e):
         self._hover = True
-        # 触发胶囊出现动画
-        if not self._time_text:
-            t = self.ctrl.timer
-            m, s = divmod(t.remaining(), 60)
-            suffix = " ⏸" if t.is_paused else ""
-            self._time_text = f"{m:02d}:{s:02d}{suffix}"
-        self._cap_target = 1.0
-        self._start_capsule_anim()
+        # 每次进入都重算：若沿用上次缓存，会先显示旧数字，
+        # 最长要等 250ms 的下一次 tick 才刷新 —— 看上去就是"闪一下旧时间"。
+        self._refresh_time_text()
+        # 悬停 → 胶囊由淡显转为完全清晰
+        self._sync_capsule_alpha()
         self.update()
 
     def leaveEvent(self, e):
         self._hover = False
-        # 触发胶囊消失动画
-        self._cap_target = 0.0
-        self._start_capsule_anim()
+        # 胶囊不消失，只回落成"淡显"（暂停中则维持清晰）
+        self._sync_capsule_alpha()
         self.update()

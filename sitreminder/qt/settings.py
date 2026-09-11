@@ -18,7 +18,7 @@ MINUTES_MIN, MINUTES_MAX = 1, 600
 
 
 class SettingsWindow(QWidget):
-    saved = Signal(int, bool)   # (interval_seconds, autostart)
+    saved = Signal(int, bool, bool)   # (interval_seconds, autostart, capsule_always)
     closed = Signal()           # 窗口关闭（点「保存」或点右上角 X 都算）
 
     def __init__(self, ctrl, cfg):
@@ -55,18 +55,33 @@ class SettingsWindow(QWidget):
         lay.addStretch(1)
 
         # ---- 自启
+        # 必须回显当前配置：原先建了复选框却没 setChecked，
+        # 于是每次打开设置窗都显示「未勾选」——配置里明明开着，界面却像关着，
+        # 用户无法判断真实状态；点一下保存还会把已开的自启写成关闭。
         self._auto = QCheckBox("开机自动启动")
+        self._auto.setChecked(bool(cfg.get("autostart", False)))
+
+        # ---- 倒计时贴纸显示模式
+        self._capsule = QCheckBox("倒计时始终显示")
+        self._capsule.setChecked(bool(cfg.get("capsule_always_visible", True)))
+        self._capsule.setToolTip("勾选：贴纸常驻（平时淡显，悬停变清晰）\n"
+                                 "不勾：平时隐藏，鼠标悬停或暂停时才出现")
 
         # ---- 操作行
+        # 「暂停/继续」按钮的文字必须反映真实状态：打开设置时倒计时已被冻结，
+        # 所以这里会显示「继续计时」。若不显示状态，用户看不到当前是停是跑，
+        # 随手一点就把冻结解掉了。
+        # 点击走 toggle_pause_from_settings()，让控制器知道这是用户的显式操作，
+        # 关窗时就不会被「未改设置则继续」的默认规则覆盖。
         ops = QHBoxLayout()
-        b_pause = QPushButton("暂停/继续")
-        b_pause.clicked.connect(self.ctrl.toggle_pause)
+        self._btn_pause = QPushButton("暂停/继续")
+        self._btn_pause.clicked.connect(self.ctrl.toggle_pause_from_settings)
         b_skip = QPushButton("跳过本次")
         b_skip.clicked.connect(self.ctrl.on_skip)
         b_save = QPushButton("保存")
         b_save.clicked.connect(self._on_save)
         b_save.setDefault(True)
-        ops.addWidget(b_pause)
+        ops.addWidget(self._btn_pause)
         ops.addWidget(b_skip)
         ops.addStretch(1)
         ops.addWidget(b_save)
@@ -74,10 +89,12 @@ class SettingsWindow(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 12)
         root.addWidget(group)
+        root.addWidget(self._capsule)
         root.addWidget(self._auto)
         root.addLayout(ops)
-
-        self._unit_changed()
+        # ⚠️ 这里绝不能调 _unit_changed()：走到这一步 _val 里已经是「目标单位」
+        # 的数值，再换算一次就等于算错 —— 5 分钟会被当成 5 分钟又 ÷60（=1 分钟），
+        # 90 秒会被当成 90 分钟 ×60（=5400 秒）。该方法只应由单位切换信号触发。
 
     def _unit_changed(self):
         """切单位时尽量换算当前值，方便连续调整。"""
@@ -98,6 +115,10 @@ class SettingsWindow(QWidget):
         except ValueError:
             return None
 
+    def set_paused(self, paused: bool):
+        """同步「暂停/继续」按钮文字（控制器在暂停状态变化时调用）。"""
+        self._btn_pause.setText("继续计时" if paused else "暂停计时")
+
     def _on_save(self):
         v = self._current_value()
         if v is None:
@@ -113,7 +134,7 @@ class SettingsWindow(QWidget):
                 self._err(f"请输入 {MIN_INTERVAL_SECONDS}-{MAX_INTERVAL_SECONDS} 之间的整数秒")
                 return
             seconds = v
-        self.saved.emit(seconds, self._auto.isChecked())
+        self.saved.emit(seconds, self._auto.isChecked(), self._capsule.isChecked())
         self.close()
 
     def _err(self, msg: str):

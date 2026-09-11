@@ -3,6 +3,7 @@
 运行：python -m unittest discover -s tests -v
 """
 
+import json
 import os
 import sys
 import tempfile
@@ -52,9 +53,25 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "config.json")
             payload = {"interval_seconds": 1200, "autostart": True,
-                       "window_pos": [880, 460]}
+                       "window_pos": [880, 460],
+                       "capsule_always_visible": False}
             self.assertTrue(config.save_config(payload, path))
             self.assertEqual(config.load_config(path), payload)
+
+    def test_capsule_always_visible_defaults_and_coercion(self):
+        """新字段 capsule_always_visible：缺省 True，非法值规整为布尔。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            # 缺省
+            path = os.path.join(tmp, "missing.json")
+            self.assertIs(config.load_config(path)["capsule_always_visible"], True)
+            # 非法值 → True；0 → False
+            for raw, expect in (("yes", True), (0, False)):
+                path = os.path.join(tmp, f"raw_{expect}.json")
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(f'{{"capsule_always_visible": {json.dumps(raw)}}}')
+                got = config.load_config(path)["capsule_always_visible"]
+                self.assertIs(got, expect)
+                os.remove(path)
 
     def test_window_pos_is_none_when_absent_or_invalid(self):
         """位置缺失/非法 → None，表示"首次启动"，由界面走默认右下角。"""

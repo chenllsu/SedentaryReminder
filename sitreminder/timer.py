@@ -23,15 +23,27 @@ class TimerState:
     def is_paused(self) -> bool:
         return self.paused
 
-    def reset(self) -> None:
-        """从完整间隔重新开始。"""
-        self._end = datetime.now() + timedelta(seconds=self.interval)
-        self._remaining = float(self.interval)
-        self.paused = False
+    def reset(self, keep_paused: bool = False) -> None:
+        """把剩余时间归位到完整间隔，重新计这一轮。
 
-    def skip(self) -> None:
-        """跳过本轮（等价于「刚活动过，重新计」）。"""
-        self.reset()
+        keep_paused=True 时「只归位剩余时间、暂停状态原样保留」。
+        用于暂停期间的重置场景：
+          - 设置窗打开时（倒计时冻结），窗内点「跳过本次」应只把本轮归零，
+            而不是顺手把冻结也解掉；
+          - 提醒气泡显示期间用户按了暂停，关掉气泡后暂停要仍然有效。
+        这两种情况用户都只是「想重置这一轮」，并没有要求开始计时。
+        """
+        self._remaining = float(self.interval)
+        self._end = datetime.now() + timedelta(seconds=self.interval)
+        if not keep_paused:
+            self.paused = False
+
+    def skip(self, keep_paused: bool = False) -> None:
+        """跳过本轮（等价于「刚活动过，重新计」）。
+
+        keep_paused 语义同 reset()：暂停中调用时是否保持暂停。
+        """
+        self.reset(keep_paused=keep_paused)
 
     def pause(self) -> None:
         if not self.paused:

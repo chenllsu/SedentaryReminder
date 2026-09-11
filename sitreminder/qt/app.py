@@ -53,6 +53,13 @@ class QtController:
         self._minimized = False
         # 本次「打开设置」期间提醒间隔是否被改动（决定关窗后继续计时 or 按新间隔重算）
         self._settings_interval_changed = False
+        # 用户在设置窗内是否显式点过「暂停/继续」。
+        # 点过说明暂停状态已被用户接管，关窗时不能再用「未改设置则继续」
+        # 的默认规则去改写他的选择。
+        self._settings_pause_touched = False
+        # 托盘菜单里的「暂停/继续」项：必须在状态变化时同步文字，
+        # 否则从托盘永远看不出现在是停着还是跑着。
+        self._tray_act_pause = None
         self._exiting = False
 
     # ------------------------------------------------------------ 启动
@@ -62,6 +69,9 @@ class QtController:
 
     def run(self):
         self.main_window = self._build_main_window()
+        # 贴纸显示模式按配置注入（常驻淡显 / 悬停才出现）
+        self.main_window.set_capsule_always(
+            bool(self.cfg.get("capsule_always_visible", True)))
         self._setup_tray()
         self.main_window.move(self._initial_pos())
         self.main_window.show()
@@ -127,7 +137,9 @@ class QtController:
         tray_menu = QMenu()
         tray_menu.addAction("显示", self.show_main)
         tray_menu.addAction("设置", self.open_settings)
-        tray_menu.addAction("暂停/继续", self.toggle_pause)
+        # 保存引用：状态变化时要改文字（暂停计时 / 继续计时），
+        # 与浮窗右键菜单保持一致。原先没存引用，所以从托盘永远看不出当前状态。
+        self._tray_act_pause = tray_menu.addAction("暂停计时", self.toggle_pause)
         tray_menu.addAction("跳过本次", self.on_skip)
         tray_menu.addSeparator()
         tray_menu.addAction("退出", self.do_exit)
@@ -136,6 +148,8 @@ class QtController:
         icon = self._load_tray_icon()
         self.tray = QSystemTrayIcon(icon)
         self.tray.setToolTip("久坐提醒 · 妮子")
+        # 每次弹出菜单前再同步一次：即使某条路径漏了更新，打开菜单时也必然正确。
+        tray_menu.aboutToShow.connect(self._sync_pause_state)
         self.tray.setContextMenu(tray_menu)
         self.tray.activated.connect(self._tray_activated)
         self.tray.show()
@@ -173,14 +187,37 @@ class QtController:
         self.timer.toggle()
         self._sync_pause_state()
 
+    def toggle_pause_from_settings(self):
+        """设置窗里的「暂停/继续」。
+
+        与普通 toggle 的唯一区别：记下「用户已显式接管暂停状态」，
+        这样关窗时不会被「未改设置则继续计时」的默认规则覆盖掉。
+        （打开设置时本来已自动冻结，所以这里点一下等于选择「继续计时」。）
+        """
+        self._settings_pause_touched = True
+        self.toggle_pause()
+
     def on_skip(self):
-        self.timer.skip()
+        """跳过本轮：剩余时间归位到完整间隔。
+
+        设置窗打开期间计时处于冻结，此时只归位、保持冻结（关窗后再由
+        默认规则继续）；平时则直接重置并开始新一轮计时。
+        """
+        frozen = self._settings is not None and self._settings.isVisible()
+        self.timer.skip(keep_paused=frozen)
         self._sync_pause_state()
 
     def _sync_pause_state(self):
+        """把暂停状态同步到所有能显示它的地方（浮窗菜单 / 托盘菜单 / 设置窗）。"""
         paused = self.timer.is_paused
         if self.main_window:
             self.main_window.set_paused(paused)
+        if self._tray_act_pause is not None:
+            self._tray_act_pause.setText("继续计时" if paused else "暂停计时")
+        if self._settings is not None:
+            # 不要求"可见"：打开设置时同步发生在 show() 之前（此刻 isVisible 还是
+            # False），若加可见判断就会漏掉首次同步，按钮会停留在「暂停/继续」。
+            self._settings.set_paused(paused)
         if self.tray is not None:
             self.tray.setToolTip("久坐提醒 · 妮子" + ("（已暂停）" if paused else ""))
 
@@ -189,7 +226,17 @@ class QtController:
             return
         self._bubble = BubbleWindow(self, pick_quip())
         self._bubble.show_near(self.main_window)
-        self._bubble.bubble_closed.connect(self.timer.reset)
+        self._bubble.bubble_closed.connect(self.on_bubble_closed)
+
+    def on_bubble_closed(self):
+        """气泡关闭 = 这一轮结束，重新计下一轮。
+
+        用 keep_paused=True：若用户在气泡显示期间按过暂停，这个暂停必须保留。
+        原先直接连 timer.reset（会清掉 paused），于是刚按下的暂停被悄悄抹掉，
+        过一会儿又被提醒一次。
+        """
+        self.timer.reset(keep_paused=True)
+        self._sync_pause_state()
 
     def open_settings(self):
         if self._settings is not None and self._settings.isVisible():
@@ -199,33 +246,44 @@ class QtController:
         # 打开设置期间冻结倒计时：剩余秒数被记下、时钟停走；
         # 关窗时再决定「从冻结处继续」还是「按新间隔重算」（见 _on_settings_closed）。
         self._settings_interval_changed = False
+        self._settings_pause_touched = False
         self.timer.pause()
-        self._sync_pause_state()
         self._settings = SettingsWindow(self, self.cfg)
         self._settings.saved.connect(self.apply_settings)
         self._settings.closed.connect(self._on_settings_closed)
+        # 同步放在设置窗创建之后：这样窗内「暂停/继续」按钮的文字
+        # 一打开就是真实状态（此刻已冻结 → 显示「继续计时」）。
+        self._sync_pause_state()
         self._settings.show_right_of(self.main_window)
 
     def _on_settings_closed(self):
         """设置窗关闭后的计时处理。
 
-        - 间隔没改（含"改了但没点保存就关窗"）→ 从冻结处继续计时；
+        - 间隔没改（含"改了但没点保存就关窗"）且用户没在窗内动过暂停
+          → 从冻结处继续计时；
+        - 用户在窗内点过「暂停/继续」→ 尊重他的选择，不用默认规则覆盖；
         - 间隔改了并已保存 → apply_settings 里已按新间隔从头重算，这里不再动。
         """
         if self._exiting:
             return
-        if not self._settings_interval_changed:
+        if not self._settings_interval_changed and not self._settings_pause_touched:
             # resume() 对"本来就是运行中"的状态是空操作，安全
             self.timer.resume()
         self._settings_interval_changed = False
+        self._settings_pause_touched = False
         self._sync_pause_state()
 
-    def apply_settings(self, interval_seconds: int, autostart: bool):
+    def apply_settings(self, interval_seconds: int, autostart: bool,
+                       capsule_always: bool = True):
         old_interval = int(self.cfg["interval_seconds"])
         self.cfg["interval_seconds"] = interval_seconds
         self.cfg["autostart"] = autostart
+        self.cfg["capsule_always_visible"] = capsule_always
         if save_config(self.cfg):
             log.info("配置已保存")
+        # 贴纸显示模式立即生效（不依赖间隔是否变化）
+        if self.main_window:
+            self.main_window.set_capsule_always(capsule_always)
         if interval_seconds != old_interval:
             # 间隔变了：按新间隔从完整时长重新开始计时
             self.timer.set_interval(interval_seconds)

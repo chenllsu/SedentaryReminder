@@ -19,6 +19,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "interval_seconds": DEFAULT_INTERVAL_SECONDS,
     "autostart": False,
     "window_pos": None,          # [x, y] 浮窗最后位置；None = 从未记录（首次启动）
+    "capsule_always_visible": True,  # 倒计时贴纸是否常驻显示；False = 悬停/暂停才出现
 }
 
 
@@ -76,6 +77,7 @@ def load_config(path: str = None) -> Dict[str, Any]:
         ),
         "autostart": bool(raw.get("autostart", False)),
         "window_pos": sanitize_window_pos(raw.get("window_pos")),
+        "capsule_always_visible": bool(raw.get("capsule_always_visible", True)),
     }
 
 

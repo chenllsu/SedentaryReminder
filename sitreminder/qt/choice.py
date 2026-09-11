@@ -52,7 +52,25 @@ class ChoiceWindow(QWidget):
         lay.addWidget(b_cancel, alignment=Qt.AlignCenter)
 
     def show_beside(self, ref):
-        rx = ref.window().frameGeometry().x()
-        ry = ref.window().frameGeometry().y()
-        self.move(rx + 24, ry + 24)
+        """置于妮子浮窗旁（右下偏移 24），并保证完整落在屏幕可用区内。
+
+        原先直接用「妮子坐标 + 24」定位。妮子是可以被拖到任意位置的，
+        一旦拖到屏幕右缘/下缘，弹窗就会有一多半跑到屏幕外，按钮点不到。
+        这里补上边界收敛：右侧放不下就翻到妮子左侧，上下超出则内收。
+        """
+        ref_win = ref.window()
+        ref_geo = ref_win.frameGeometry()
+        scr = ref_win.screen() or self.screen()
+        avail = scr.availableGeometry()
+
+        w, h = self.width(), self.height()
+        x = ref_geo.x() + 24
+        y = ref_geo.y() + 24
+        # 右边放不下 → 翻到妮子左侧
+        if x + w > avail.right():
+            x = ref_geo.left() - 24 - w
+        # 兜底：无论落在哪一侧，都不许越出屏幕可用区
+        x = max(avail.left(), min(x, avail.right() - w))
+        y = max(avail.top(), min(y, avail.bottom() - h))
+        self.move(x, y)
         self.show()

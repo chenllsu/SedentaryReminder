@@ -15,8 +15,15 @@ BTN_BLUE = QColor("#007aff")          # 主按钮
 BTN_BLUE_HOVER = QColor("#0066d6")
 SHADOW_NEAR = QColor(30, 30, 34, 22)  # 近层阴影（真半透明）
 SHADOW_FAR = QColor(30, 30, 34, 10)   # 远层淡阴影
-CAPSULE_BG = QColor(30, 30, 34, 255)  # hover 胶囊底
-CAPSULE_TEXT = QColor("#f5f5f7")
+# 倒计时胶囊（v0.6「爪印贴纸」）——配色取自妮子本体的奶咖色系
+CAPSULE_STICKER_EDGE = QColor("#ffffff")   # 白色剪纸外描边（贴纸感）
+CAPSULE_CREAM_BG = QColor("#FDF6EC")       # 平时：奶米底
+CAPSULE_CREAM_BORDER = QColor("#D9C9B4")   # 平时：内芯细描边
+CAPSULE_TEXT_BROWN = QColor("#5A4636")     # 平时：文字深棕
+CAPSULE_PAW = QColor("#8A6F56")            # 平时：爪印
+CAPSULE_PAUSED_BG = QColor("#F6C87E")      # 暂停：琥珀底（常亮）
+CAPSULE_PAUSED_BORDER = QColor("#B8863B")  # 暂停：内芯描边
+CAPSULE_PAUSED_TEXT = QColor("#7A5217")    # 暂停：文字与爪印
 MASCOT_SHADOW_30 = QColor(20, 18, 24, 30)
 MASCOT_SHADOW_20 = QColor(20, 18, 24, 20)
 MASCOT_SHADOW_10 = QColor(20, 18, 24, 10)
@@ -49,7 +56,7 @@ FONT_FAMILY = "Microsoft YaHei"
 FONT_QUOTE = 15     # 提醒主文案
 FONT_TAG = 11       # 眉头标签
 FONT_BTN = 10
-FONT_TIME = 14      # 倒计时等宽
+FONT_TIME = 12      # 倒计时等宽
 
 
 def make_font(px: int, bold: bool = False, family: str = FONT_FAMILY) -> QFont:
