@@ -24,12 +24,13 @@
 
 ### 方式一：打包成 exe 运行（推荐，免装 Python）
 
-用下方「从源码打包」生成 `SitReminder.exe`，双击运行即可。
+用下方「从源码打包」生成 `SitReminder.exe`，双击运行即可（已在 Windows 上实测通过，单文件约 57 MB）。
 
+- **首次启动约需 20 秒**：单文件模式启动时要先把自身解包到临时目录，这段时间看不到妮子属正常现象，之后就快了
 - 首次运行 Windows 可能弹出 SmartScreen 提示（无签名正常现象），点「仍要运行」
-- `config.json` 会在 exe 同目录自动生成
+- `config.json` 会在 exe 同目录自动生成，记录间隔 / 窗口位置 / 贴纸常驻偏好
+- 想让设置和窗口位置存得住，**别把 exe 放在 `C:\Program Files` 这类只读目录**（那里写不进文件）
 - 想开机自启：把 exe 的快捷方式放进 `shell:startup` 文件夹（Win+R 输入 `shell:startup`）
-- 注：打包配置（`SitReminder.spec`）已就绪，但产物尚未在干净环境下实测
 
 ### 方式二：从源码运行
 
@@ -70,7 +71,11 @@ python main.py --debug
 pip install pyinstaller
 pyinstaller SitReminder.spec
 # 产物在 dist/SitReminder.exe
+# 单文件约 57 MB，构建约 2–3 分钟
 ```
+
+> 打包版与源码版的配置**互相独立**：打包版读写 exe 同目录的 `config.json`，
+> 源码版读写项目根目录的 `config.json`。在一边改了设置，不影响另一边。
 
 或不用 spec 手动指定参数：
 
@@ -146,7 +151,7 @@ python main.py --debug
 
 ## 配置文件
 
-`config.json` 与程序同目录（已加入 `.gitignore`，不会进仓库），字段：
+`config.json` 与程序同目录 —— 源码运行时在项目根目录，打包运行（exe）时在 exe 同目录，两份互不影响（已加入 `.gitignore`，不会进仓库）。字段：
 
 | 字段 | 说明 |
 |------|------|
@@ -169,7 +174,7 @@ python main.py --debug
 
 ## 环境支持
 
-- Windows — 已完整测试；PyInstaller 打包配置齐备，打包产物尚未实机验证
+- Windows — 已完整测试；PyInstaller 打包产物已实机验证（单文件约 57 MB，浮窗显示 / 资源解包 / Qt 插件 / 日志写入 / 配置读写均正常）
 - Linux / macOS — 理论可运行（代码内含 Unix 单实例锁与路径分支），未打包测试，欢迎反馈
 
 ## License
