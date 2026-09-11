@@ -6,7 +6,12 @@
 v0.4 改造：
   - 位置策略：枚举四个方向（上下左右），优先放"贴猫且不出屏幕"的位置；
     尾巴方向跟随位置动态指向猫
-  - 文字布局：QRectF 分层（label / rule / body / button），间距用 qtheme 常量统一控制
+  - 文字布局：QRectF 分层，间距用 qtheme 常量统一控制
+
+v0.7 改造（「爪印贴纸」统一）：
+  - 去掉「久坐提醒」标签行与分隔线，只留正文 + 琥珀「知道了」按钮
+  - 白卡 → 奶米贴纸卡（白剪纸外沿 + 细描边），与倒计时贴纸/关闭弹窗同一套语言
+  - 320×200 → 260×148，内边距与按钮同步收紧，阴影改暖棕调
 """
 from __future__ import annotations
 
@@ -23,10 +28,11 @@ from . import qtheme
 log = logging.getLogger(__name__)
 
 # 整窗尺寸（含透明边距，给阴影留空间）
-W = 320
-H = 200
-MARGIN = 26
-RADIUS = 16
+# v0.7：去标签行只留正文+按钮，320×200 → 260×148，贴纸化配色
+W = 260
+H = 148
+MARGIN = 20
+RADIUS = 14
 TAIL_LEN = qtheme.BUBBLE_TAIL_LEN
 TAIL_HALF = qtheme.BUBBLE_TAIL_HALF
 
@@ -205,21 +211,32 @@ class BubbleWindow(QWidget):
         body.addRoundedRect(card, RADIUS * s, RADIUS * s)
         body = self._merge_tail(body, card)
 
-        # 阴影沿合并后的整体外轮廓绘制（含尾巴），再整体填白卡
+        # 阴影沿合并后的整体外轮廓绘制（含尾巴），再整体填奶米卡
         self._draw_shadow(p, body)
-        p.fillPath(body, qtheme.CARD_BG)
+        # 贴纸语言：白色剪纸外沿（5px 白描边）+ 奶米内芯 + 内芯细描边
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(qtheme.STICKER_EDGE, 5))
+        p.drawPath(body)
+        p.fillPath(body, qtheme.STICKER_BG)
+        inner = QPainterPath()
+        inner.addRoundedRect(card.adjusted(1.5, 1.5, -1.5, -1.5),
+                             RADIUS - 1.5, RADIUS - 1.5)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(qtheme.STICKER_BORDER, 1))
+        p.drawPath(inner)
 
         if self._started:
             self._draw_content(p, card)
 
     def _draw_shadow(self, p, body):
         # 沿「卡片+尾巴」合并轮廓做多层偏移半透明描边 = 柔和投影。
-        # 由于 body 先描边、再在下方整体填白卡，内扩部分会被白底盖掉，
+        # 由于 body 先描边、再在下方整体填卡，内扩部分会被底色盖掉，
         # 只留下朝外扩散的羽化投影 → 不会在尾巴/卡片之间留下切缝。
+        # v0.7：黑灰调改暖棕调，与奶咖贴纸色系融合。
         for dx, dy, w, col in (
-            (5, 6, 14, QColor(0, 0, 0, 10)),
-            (3, 4, 9,  QColor(0, 0, 0, 16)),
-            (1, 2, 4,  QColor(0, 0, 0, 22)),
+            (5, 6, 14, QColor(90, 70, 54, 12)),
+            (3, 4, 9,  QColor(90, 70, 54, 18)),
+            (1, 2, 4,  QColor(90, 70, 54, 26)),
         ):
             shifted = QPainterPath(body)   # body 自画不可直接改，复制一份平移
             shifted.translate(dx, dy)
@@ -265,47 +282,26 @@ class BubbleWindow(QWidget):
         return body.united(tail)
 
     def _draw_content(self, p, card):
-        """分层布局：label 区 / rule / body 区 / 按钮区。
+        """分层布局：正文区 / 按钮区。
 
-        垂直方向由 qtheme 常量决定间距；body 区按实际行数自适应。
+        v0.7 去掉「久坐提醒」标签行与分隔线（视觉重心交给正文与琥珀按钮），
+        正文夹在卡片顶部与按钮之间、按实际行数垂直居中。
         """
-        # ---- 区域 1：标签 "久 坐 提 醒"
-        label_h = 22
-        label_rect = QRectF(card.left(), card.top() + qtheme.BUBBLE_PAD_TOP,
-                            card.width(), label_h)
-
-        # ---- 区域 2：分隔线（短横线，居中）
-        rule_y = label_rect.bottom() + qtheme.BUBBLE_GAP_LABEL_RULE
-        rule_w = qtheme.BUBBLE_RULE_W
-        rule_rect = QRectF(card.center().x() - rule_w / 2, rule_y,
-                           rule_w, 1)
-
-        # ---- 区域 3：按钮（固定位置，在卡片底部）
+        # ---- 按钮区（固定位置，卡片底部居中）
         btn_w = qtheme.BUBBLE_BTN_W
         btn_h = qtheme.BUBBLE_BTN_H
         btn_rect = QRectF(card.center().x() - btn_w / 2,
                            card.bottom() - qtheme.BUBBLE_PAD_BOT - btn_h,
                            btn_w, btn_h)
 
-        # ---- 区域 4：正文（夹在分隔线和按钮之间，按行数居中）
-        body_top = rule_rect.bottom() + qtheme.BUBBLE_GAP_RULE_BODY
-        body_bot = btn_rect.top() - qtheme.BUBBLE_GAP_BODY_BTN
+        # ---- 正文区（夹在卡片顶部与按钮之间）
+        body_top = card.top() + qtheme.BUBBLE_PAD_TOP
         body_rect = QRectF(card.left() + qtheme.BUBBLE_PAD_X, body_top,
                            card.width() - qtheme.BUBBLE_PAD_X * 2,
-                           body_bot - body_top)
-
-        # 画标签
-        p.setPen(qtheme.CARD_SUBTEXT)
-        p.setFont(make_font(qtheme.FONT_TAG, bold=False))
-        p.drawText(label_rect, Qt.AlignCenter, "久 坐 提 醒")
-
-        # 画分隔线
-        p.setPen(QPen(qtheme.CARD_RULE, 1))
-        p.drawLine(QPointF(rule_rect.left(), rule_y),
-                   QPointF(rule_rect.right(), rule_y))
+                           btn_rect.top() - qtheme.BUBBLE_GAP_BODY_BTN - body_top)
 
         # 画正文（多行在 body_rect 内垂直居中）
-        p.setPen(qtheme.CARD_TEXT)
+        p.setPen(qtheme.STICKER_TEXT)
         p.setFont(make_font(qtheme.FONT_QUOTE))
         fm = p.fontMetrics()
         line_h = fm.lineSpacing()
@@ -317,13 +313,16 @@ class BubbleWindow(QWidget):
             p.drawText(QPointF(lx, first_y + (i + 1) * line_h - fm.descent()),
                        line)
 
-        # 画按钮（hover 状态）
+        # 画按钮（hover 状态）：琥珀胶囊
         path = QPainterPath()
         path.addRoundedRect(btn_rect, btn_h / 2, btn_h / 2)
-        col = qtheme.BTN_BLUE_HOVER if self._hover_btn else qtheme.BTN_BLUE
+        col = (qtheme.STICKER_ACCENT_HOVER if self._hover_btn
+               else qtheme.STICKER_ACCENT_BG)
         p.fillPath(path, col)
-        p.setPen(qtheme.CARD_BG)
-        p.setFont(make_font(qtheme.FONT_BTN))
+        p.setPen(QPen(qtheme.STICKER_ACCENT_BORDER, 1))
+        p.drawPath(path)
+        p.setPen(qtheme.STICKER_ACCENT_TEXT)
+        p.setFont(make_font(qtheme.FONT_BTN, bold=True))
         p.drawText(btn_rect, Qt.AlignCenter, "知道了")
         self._btn_rect = btn_rect
 

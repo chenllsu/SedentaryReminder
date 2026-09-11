@@ -14,7 +14,7 @@ from PySide6.QtGui import QIcon, QPixmap, QImage
 from .. import paths
 from ..config import load_config, save_config
 from ..timer import TimerState
-from ..quips import pick_quip
+from ..quips import DEFAULT_STYLE, pick_quip
 from .window import SitReminderWindow
 from .settings import SettingsWindow
 from .choice import ChoiceWindow
@@ -224,7 +224,7 @@ class QtController:
     def on_due(self):
         if self._bubble is not None and self._bubble.isVisible():
             return
-        self._bubble = BubbleWindow(self, pick_quip())
+        self._bubble = BubbleWindow(self, pick_quip(self.cfg.get("quip_style")))
         self._bubble.show_near(self.main_window)
         self._bubble.bubble_closed.connect(self.on_bubble_closed)
 
@@ -274,11 +274,13 @@ class QtController:
         self._sync_pause_state()
 
     def apply_settings(self, interval_seconds: int, autostart: bool,
-                       capsule_always: bool = True):
+                       capsule_always: bool = True,
+                       quip_style: str = DEFAULT_STYLE):
         old_interval = int(self.cfg["interval_seconds"])
         self.cfg["interval_seconds"] = interval_seconds
         self.cfg["autostart"] = autostart
         self.cfg["capsule_always_visible"] = capsule_always
+        self.cfg["quip_style"] = quip_style
         if save_config(self.cfg):
             log.info("配置已保存")
         # 贴纸显示模式立即生效（不依赖间隔是否变化）

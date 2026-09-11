@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS
+from ..quips import DEFAULT_STYLE, STYLES
 
 log = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ MINUTES_MIN, MINUTES_MAX = 1, 600
 
 
 class SettingsWindow(QWidget):
-    saved = Signal(int, bool, bool)   # (interval_seconds, autostart, capsule_always)
+    saved = Signal(int, bool, bool, str)   # (interval_seconds, autostart, capsule_always, quip_style)
     closed = Signal()           # 窗口关闭（点「保存」或点右上角 X 都算）
 
     def __init__(self, ctrl, cfg):
@@ -67,6 +68,19 @@ class SettingsWindow(QWidget):
         self._capsule.setToolTip("勾选：贴纸常驻（平时淡显，悬停变清晰）\n"
                                  "不勾：平时隐藏，鼠标悬停或暂停时才出现")
 
+        # ---- 话术风格
+        # 龙哥 2026-09-11 需求：妮子支持 5 类性格话术（傲娇/温柔/呆萌/冷漠/可爱），
+        # 外加「默认」（原 10 条，未设置时用它）与「随机」（每次全池抽）。
+        # 随「保存」生效：与间隔/自启等一致，选了不点保存就不算数。
+        style_row = QHBoxLayout()
+        style_label = QLabel("话术风格")
+        self._style = QComboBox()
+        self._style.addItems(STYLES)
+        self._style.setCurrentText(str(cfg.get("quip_style") or DEFAULT_STYLE))
+        style_row.addWidget(style_label)
+        style_row.addWidget(self._style)
+        style_row.addStretch(1)
+
         # ---- 操作行
         # 「暂停/继续」按钮的文字必须反映真实状态：打开设置时倒计时已被冻结，
         # 所以这里会显示「继续计时」。若不显示状态，用户看不到当前是停是跑，
@@ -89,6 +103,7 @@ class SettingsWindow(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 12)
         root.addWidget(group)
+        root.addLayout(style_row)
         root.addWidget(self._capsule)
         root.addWidget(self._auto)
         root.addLayout(ops)
@@ -97,17 +112,14 @@ class SettingsWindow(QWidget):
         # 90 秒会被当成 90 分钟 ×60（=5400 秒）。该方法只应由单位切换信号触发。
 
     def _unit_changed(self):
-        """切单位时尽量换算当前值，方便连续调整。"""
+        """切单位时输入框里的数字保持原样（龙哥 2026-09-11 指定）。
+
+        只更新当前单位标记，数值不做任何换算——用户输入 5，
+        分钟切秒、秒切分钟都仍是 5，具体含义由保存时按单位解释。
+        """
         if not hasattr(self, "_unit"):
             return
-        cur = self._current_value()
-        is_min = self._unit.currentIndex() == 0
-        self._unit_min = is_min
-        if cur is not None:
-            if is_min:
-                self._val.setText(str(max(1, cur // 60)))
-            else:
-                self._val.setText(str(cur * 60))
+        self._unit_min = self._unit.currentIndex() == 0
 
     def _current_value(self):
         try:
@@ -134,7 +146,8 @@ class SettingsWindow(QWidget):
                 self._err(f"请输入 {MIN_INTERVAL_SECONDS}-{MAX_INTERVAL_SECONDS} 之间的整数秒")
                 return
             seconds = v
-        self.saved.emit(seconds, self._auto.isChecked(), self._capsule.isChecked())
+        self.saved.emit(seconds, self._auto.isChecked(),
+                        self._capsule.isChecked(), self._style.currentText())
         self.close()
 
     def _err(self, msg: str):

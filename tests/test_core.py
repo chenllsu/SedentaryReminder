@@ -54,7 +54,8 @@ class ConfigTests(unittest.TestCase):
             path = os.path.join(tmp, "config.json")
             payload = {"interval_seconds": 1200, "autostart": True,
                        "window_pos": [880, 460],
-                       "capsule_always_visible": False}
+                       "capsule_always_visible": False,
+                       "quip_style": "傲娇"}
             self.assertTrue(config.save_config(payload, path))
             self.assertEqual(config.load_config(path), payload)
 
@@ -131,6 +132,29 @@ class QuipTests(unittest.TestCase):
     def test_only_picks_from_builtin_library(self):
         for _ in range(50):
             self.assertIn(quips.pick_quip(), quips.QUIPS)
+
+    def test_every_style_has_20_quips(self):
+        for style in ("傲娇", "温柔", "呆萌", "冷漠", "可爱"):
+            self.assertEqual(len(quips.QUIPS_BY_STYLE[style]), 20, style)
+
+    def test_pick_from_given_style(self):
+        for style in quips.STYLES:
+            for _ in range(30):
+                q = quips.pick_quip(style)
+                pool = (quips._ALL_POOL if style == quips.MIX_STYLE
+                        else quips.QUIPS_BY_STYLE.get(style, quips.QUIPS))
+                self.assertIn(q, pool, style)
+
+    def test_unknown_style_falls_back_to_default(self):
+        for _ in range(30):
+            self.assertIn(quips.pick_quip("不存在的风格"), quips.QUIPS)
+        self.assertIn(quips.pick_quip(None), quips.QUIPS)
+
+    def test_quip_style_config_sanitized(self):
+        cases = {"傲娇": "傲娇", "随机": "随机", "胡写的": "默认",
+                 None: "默认", 42: "默认", "": "默认"}
+        for raw, want in cases.items():
+            self.assertEqual(config._sanitize_quip_style(raw), want)
 
 
 if __name__ == "__main__":

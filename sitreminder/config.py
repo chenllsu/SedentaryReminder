@@ -8,6 +8,7 @@ import os
 from typing import Any, Dict
 
 from . import paths
+from .quips import DEFAULT_STYLE, STYLES
 
 log = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "autostart": False,
     "window_pos": None,          # [x, y] 浮窗最后位置；None = 从未记录（首次启动）
     "capsule_always_visible": True,  # 倒计时贴纸是否常驻显示；False = 悬停/暂停才出现
+    "quip_style": DEFAULT_STYLE,     # 话术风格；「随机」= 每次从全部风格里抽
 }
 
 
@@ -78,7 +80,15 @@ def load_config(path: str = None) -> Dict[str, Any]:
         "autostart": bool(raw.get("autostart", False)),
         "window_pos": sanitize_window_pos(raw.get("window_pos")),
         "capsule_always_visible": bool(raw.get("capsule_always_visible", True)),
+        # 话术风格：只认 STYLES 里的值，其他一律回退「默认」
+        "quip_style": _sanitize_quip_style(raw.get("quip_style")),
     }
+
+
+def _sanitize_quip_style(raw: Any) -> str:
+    """话术风格收敛：缺失/非法/手改配置 → 回退「默认」。"""
+    style = raw if isinstance(raw, str) else None
+    return style if style in STYLES else DEFAULT_STYLE
 
 
 def save_config(cfg: Dict[str, Any], path: str = None) -> bool:

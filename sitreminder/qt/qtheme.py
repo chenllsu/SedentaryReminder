@@ -7,14 +7,27 @@ from __future__ import annotations
 from PySide6.QtGui import QColor, QFont
 
 TRANS_PARENT = QColor(0, 0, 0, 0)     # 完全透明
-CARD_BG = QColor("#ffffff")           # 气泡白卡
-CARD_TEXT = QColor("#1d1d1f")         # 主文案
-CARD_SUBTEXT = QColor("#8e8e93")      # 眉头标签灰
-CARD_RULE = QColor("#e8e8ec")         # 分隔线
-BTN_BLUE = QColor("#007aff")          # 主按钮
+CARD_BG = QColor("#ffffff")           # （旧）气泡白卡，smoke_qt.py 仍引用
+CARD_TEXT = QColor("#1d1d1f")         # （旧）主文案
+CARD_SUBTEXT = QColor("#8e8e93")      # （旧）眉头标签灰
+CARD_RULE = QColor("#e8e8ec")         # （旧）分隔线
+BTN_BLUE = QColor("#007aff")          # （旧）主按钮
 BTN_BLUE_HOVER = QColor("#0066d6")
-SHADOW_NEAR = QColor(30, 30, 34, 22)  # 近层阴影（真半透明）
-SHADOW_FAR = QColor(30, 30, 34, 10)   # 远层淡阴影
+
+# 贴纸设计语言（v0.7 统一：倒计时贴纸 / 关闭弹窗 / 提醒气泡共用）
+STICKER_EDGE = QColor("#ffffff")           # 白色剪纸外沿
+STICKER_BG = QColor("#FDF6EC")             # 奶米内芯
+STICKER_BORDER = QColor("#D9C9B4")         # 内芯细描边
+STICKER_TEXT = QColor("#5A4636")           # 深棕文字
+STICKER_PAW = QColor("#8A6F56")            # 爪印棕
+STICKER_BTN_BG = QColor("#ffffff")         # 次级按钮：白底
+STICKER_BTN_HOVER = QColor("#F0DCB2")      # 次级按钮 hover
+STICKER_ACCENT_BG = QColor("#F6C87E")      # 主按钮：琥珀（与暂停色同源）
+STICKER_ACCENT_HOVER = QColor("#EFB25A")   # 主按钮 hover
+STICKER_ACCENT_BORDER = QColor("#B8863B")  # 主按钮描边
+STICKER_ACCENT_TEXT = QColor("#7A5217")    # 主按钮文字
+STICKER_SHADOW = QColor(90, 70, 54, 70)    # 暖棕柔和阴影
+
 # 倒计时胶囊（v0.6「爪印贴纸」）——配色取自妮子本体的奶咖色系
 CAPSULE_STICKER_EDGE = QColor("#ffffff")   # 白色剪纸外描边（贴纸感）
 CAPSULE_CREAM_BG = QColor("#FDF6EC")       # 平时：奶米底
@@ -27,7 +40,6 @@ CAPSULE_PAUSED_TEXT = QColor("#7A5217")    # 暂停：文字与爪印
 MASCOT_SHADOW_30 = QColor(20, 18, 24, 30)
 MASCOT_SHADOW_20 = QColor(20, 18, 24, 20)
 MASCOT_SHADOW_10 = QColor(20, 18, 24, 10)
-CHOICE_BG = QColor("#fff7e6")
 WINDOW_BG = QColor("#f0f0f0")
 
 # 间距 / 布局常量（Qt 版独立于此模块外引用）
@@ -36,25 +48,22 @@ SP_SM = 8
 SP_MD = 14
 SP_LG = 22
 
-# 气泡布局参数
-BUBBLE_PAD_X = 24
-BUBBLE_PAD_TOP = 18
-BUBBLE_PAD_BOT = 16
-BUBBLE_GAP_LABEL_RULE = 8
-BUBBLE_GAP_RULE_BODY = 14
-BUBBLE_GAP_BODY_BTN = 18
-BUBBLE_BTN_W = 104
-BUBBLE_BTN_H = 32
-BUBBLE_RULE_W = 24
-BUBBLE_TAIL_LEN = 18
-BUBBLE_TAIL_HALF = 12
+# 气泡布局参数（v0.7：去标签行，只留正文 + 按钮，整体紧凑化）
+BUBBLE_PAD_X = 18
+BUBBLE_PAD_TOP = 14
+BUBBLE_PAD_BOT = 12
+BUBBLE_GAP_BODY_BTN = 12
+BUBBLE_BTN_W = 84
+BUBBLE_BTN_H = 26
+BUBBLE_TAIL_LEN = 14
+BUBBLE_TAIL_HALF = 10
 
 # 主浮窗胶囊参数
 CAPSULE_OFFSET_FROM_CAT = 18  # 胶囊与猫身外沿的像素距离
 
 FONT_FAMILY = "Microsoft YaHei"
-FONT_QUOTE = 15     # 提醒主文案
-FONT_TAG = 11       # 眉头标签
+FONT_QUOTE = 13     # 提醒主文案（v0.7 由 15 收窄，v0.7.1 龙哥要求再小一档）
+FONT_TAG = 11       # 眉头标签（旧样式保留，smoke_qt.py 引用）
 FONT_BTN = 10
 FONT_TIME = 12      # 倒计时等宽
 
