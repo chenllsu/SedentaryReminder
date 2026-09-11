@@ -26,9 +26,20 @@ class ChoiceWindow(QWidget):
 
         frame = QFrame(self)
         frame.setObjectName("card")
+        # ⚠️ 按钮必须显式指定颜色：半透明 + Qt.Popup 窗口上，Qt 的 windows11
+        # 风格会把默认 QPushButton 画成「白底白字」，与奶油卡片融为一体，
+        # 用户看到的是一张没有按钮的空卡（实测 PrintWindow 抓图证实）。
+        # 标题看得清是因为它单独写死了颜色。这里连同 hover/pressed 一起定死。
         frame.setStyleSheet(
             "#card { background: #fff7e6; border: 1px solid #e6d8b5;"
-            " border-radius: 12px; }")
+            " border-radius: 12px; }"
+            "#card QLabel { color: #5a4a2a; }"
+            "#card QPushButton { background: #ffffff; color: #5a4a2a;"
+            " border: 1px solid #e6d8b5; border-radius: 8px;"
+            " padding: 5px 12px; font-size: 12px; }"
+            "#card QPushButton:hover { background: #fdf0d5;"
+            " border-color: #d9c08a; }"
+            "#card QPushButton:pressed { background: #f5e3bd; }")
         frame.setGeometry(6, 6, 248, 120)
 
         lay = QVBoxLayout(frame)

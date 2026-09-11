@@ -214,7 +214,8 @@ class SitReminderWindow(QWidget):
     # ------------------------------------------------------------ 菜单
     def _build_menu(self):
         self.menu = QMenu(self)
-        self.menu.addAction("显示主窗口", self.ctrl.show_main)
+        # 「显示主窗口」已移除：妮子常驻桌面时它是摆设；最小化隐藏后
+        # 由托盘兜底找回（单击托盘图标 / 托盘菜单「显示」均调 show_main）。
         self.menu.addAction("设置", self.ctrl.open_settings)
         self.act_pause = self.menu.addAction("暂停/继续", self.ctrl.toggle_pause)
         self.menu.addAction("跳过本次", self.ctrl.on_skip)
