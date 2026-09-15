@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt, QPoint, QRect
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QWidget
 from PySide6.QtGui import QIcon, QPixmap, QImage
 
-from .. import paths
+from .. import autostart, paths
 from ..config import load_config, save_config
 from ..timer import TimerState
 from ..quips import DEFAULT_STYLE, pick_quip
@@ -60,6 +60,8 @@ class QtController:
         # 托盘菜单里的「暂停/继续」项：必须在状态变化时同步文字，
         # 否则从托盘永远看不出现在是停着还是跑着。
         self._tray_act_pause = None
+        # 托盘菜单首项（显示/隐藏妮子）：文字要跟着显隐状态走，不能写死。
+        self._tray_act_toggle = None
         self._exiting = False
 
     # ------------------------------------------------------------ 启动
@@ -72,10 +74,27 @@ class QtController:
         # 贴纸显示模式按配置注入（常驻淡显 / 悬停才出现）
         self.main_window.set_capsule_always(
             bool(self.cfg.get("capsule_always_visible", True)))
+        self._sync_autostart()
         self._setup_tray()
         self.main_window.move(self._initial_pos())
         self.main_window.show()
         return self._qapp.exec()
+
+    def _sync_autostart(self):
+        """启动时校正自启项（FR-7）。
+
+        配置里勾着「开机自启」但系统里查不到项（首次勾选后程序被移动、
+        或换了 exe 路径）时补写一次，避免「界面上开着、开机却不启动」。
+        没勾选则不动，绝不擅自删掉用户手工加的启动项。
+        """
+        if not self.cfg.get("autostart"):
+            return
+        if not autostart.is_supported():
+            return
+        if autostart.enable():
+            log.info("开机自启项已确认：%s", autostart.launch_command())
+        else:
+            log.warning("开机自启项写入失败，重启后可能不会自动启动")
 
     # ------------------------------------------------------------ 窗口位置
     def _default_pos(self) -> QPoint:
@@ -127,6 +146,23 @@ class QtController:
         self.main_window.showNormal()
         self.main_window.raise_()
         self.main_window.activateWindow()
+        self._minimized = False
+
+    def toggle_main_visible(self):
+        """托盘右键菜单首项：正显示 → 收起；已收起 → 唤回。
+
+        入口只保留右键菜单一处（2026-09-14 起）：托盘单击不再切换显隐，
+        免得同一个动作有两个入口、随手一点就把妮子收没了。
+        注意：收起只是隐藏，**不是退出**——计时照走，到点仍会弹气泡。
+        """
+        if self.main_window is None:
+            return
+        if self.main_window.isVisible():
+            self.main_window.hide()
+            self._minimized = True
+        else:
+            self.show_main()
+        self._sync_main_visible_state()
 
     # ------------------------------------------------------------ 系统托盘
     def _setup_tray(self):
@@ -135,7 +171,10 @@ class QtController:
             self.tray = None
             return
         tray_menu = QMenu()
-        tray_menu.addAction("显示", self.show_main)
+        # 首项是「显示 / 隐藏」切换：文字随妮子当前是否在桌面上而变（见
+        # _sync_main_visible_state）。点击行为统一走 toggle_main_visible，
+        # 与单击托盘图标一致。
+        self._tray_act_toggle = tray_menu.addAction("显示", self.toggle_main_visible)
         tray_menu.addAction("设置", self.open_settings)
         # 保存引用：状态变化时要改文字（暂停计时 / 继续计时），
         # 与浮窗右键菜单保持一致。原先没存引用，所以从托盘永远看不出当前状态。
@@ -150,13 +189,11 @@ class QtController:
         self.tray.setToolTip("久坐提醒 · 妮子")
         # 每次弹出菜单前再同步一次：即使某条路径漏了更新，打开菜单时也必然正确。
         tray_menu.aboutToShow.connect(self._sync_pause_state)
+        tray_menu.aboutToShow.connect(self._sync_main_visible_state)
         self.tray.setContextMenu(tray_menu)
-        self.tray.activated.connect(self._tray_activated)
+        # 刻意不接 activated 信号：显隐统一由右键菜单首项承担，
+        # 单击托盘图标不做任何事——同一个动作留两个入口，随手一点就容易把妮子收没了。
         self.tray.show()
-
-    def _tray_activated(self, reason):
-        if reason == QSystemTrayIcon.Trigger:   # 单击托盘
-            self.show_main()
 
     def _load_tray_icon(self) -> QIcon:
         """托盘图标：复用主浮窗同款素材与朝向（B 朝向），保证方向一致。
@@ -221,6 +258,17 @@ class QtController:
         if self.tray is not None:
             self.tray.setToolTip("久坐提醒 · 妮子" + ("（已暂停）" if paused else ""))
 
+    def _sync_main_visible_state(self):
+        """托盘菜单首项文字跟着妮子显隐走：在桌上 → 「隐藏」，已收起 → 「显示」。
+
+        该项的点击行为是 toggle_main_visible()，所以文字必须与当前状态严格对应；
+        写死成「显示」的话，妮子明明就在桌面上，点一下反而把它收起来了。
+        """
+        if self._tray_act_toggle is None or self.main_window is None:
+            return
+        self._tray_act_toggle.setText(
+            "隐藏" if self.main_window.isVisible() else "显示")
+
     def on_due(self):
         if self._bubble is not None and self._bubble.isVisible():
             return
@@ -273,12 +321,12 @@ class QtController:
         self._settings_pause_touched = False
         self._sync_pause_state()
 
-    def apply_settings(self, interval_seconds: int, autostart: bool,
+    def apply_settings(self, interval_seconds: int, autostart_enabled: bool,
                        capsule_always: bool = True,
                        quip_style: str = DEFAULT_STYLE):
         old_interval = int(self.cfg["interval_seconds"])
         self.cfg["interval_seconds"] = interval_seconds
-        self.cfg["autostart"] = autostart
+        self.cfg["autostart"] = autostart_enabled
         self.cfg["capsule_always_visible"] = capsule_always
         self.cfg["quip_style"] = quip_style
         if save_config(self.cfg):
@@ -296,8 +344,23 @@ class QtController:
             # 间隔未变：不碰计时器（保持冻结），关窗时从暂停处继续
             log.info("提醒间隔未变，计时保持冻结，关窗后继续")
         self._sync_pause_state()
-        if autostart:
-            log.info("「开机自启」偏好已记录，具体写入逻辑待实现（FR-7）")
+        self._apply_autostart(autostart_enabled)
+
+    def _apply_autostart(self, enabled: bool):
+        """把「开机自启」偏好真正落到操作系统（FR-7）。
+
+        写失败只记日志、不抛错：偏好已经存进 config.json 了，下次启动
+        _sync_autostart() 还会再试；不该因为写注册表失败就让「保存」整体失败。
+        """
+        if not autostart.is_supported():
+            log.info("当前平台不支持开机自启，偏好已记录：%s", enabled)
+            return
+        if autostart.set_enabled(enabled):
+            log.info("开机自启已%s（%s）", "开启" if enabled else "关闭",
+                     autostart.launch_command())
+        else:
+            log.warning("开机自启%s失败，偏好已保存，下次启动会重试",
+                        "开启" if enabled else "关闭")
 
     def do_minimize(self):
         self.main_window.hide()

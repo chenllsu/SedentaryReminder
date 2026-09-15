@@ -1,18 +1,31 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 # 主程序拆成 sitreminder 包，UI 层在 sitreminder.qt 子包下。
-# 显式收集全部子模块避免动态 import 被 PyInstaller 漏掉。
-hiddenimports = (
-    collect_submodules('sitreminder')
-    + collect_submodules('PySide6')
-)
-
-# 收集 PySide6 自带的 Qt 插件、qml 等运行时资源
-datas = [
-    ('assets', 'assets'),
+#
+# 这里只显式列出 Qt 侧模块，**不再用 collect_submodules 整包收集**：
+# 那会把包里当时已归档的 Tk 模块（app / imagery / tray / ui）也当成隐藏导入
+# 拖进分析，构建日志里随之出现 tkinter / PIL / pystray 缺失警告。
+# PySide6 同理——交给 PyInstaller 自带的 hook 按实际 import 收集即可，
+# 全量子模块收集连 QtQml、QtWebEngine 的边角都算了进来。
+hiddenimports = [
+    'sitreminder.qt.app',
+    'sitreminder.qt.window',
+    'sitreminder.qt.settings',
+    'sitreminder.qt.choice',
+    'sitreminder.qt.bubble',
+    'sitreminder.qt.qtheme',
 ]
-datas += collect_data_files('PySide6', includes=['*.qml', '*.glsl'])
+
+# 只打包运行时真正用到的 3 个资源：
+#   nizi_clean_qt.png —— Qt 版猫图（512×512 高清源）
+#   nizi_clean.png    —— 猫图与托盘图标的兜底（paths.MASCOT_PATH）
+#   icon.ico          —— exe 与窗口图标
+# 其余素材（nizi.png、nizi_user_source.jpg、_previews/ 设计稿）仅开发期使用，不进包。
+datas = [
+    ('assets/nizi_clean_qt.png', 'assets'),
+    ('assets/nizi_clean.png', 'assets'),
+    ('assets/icon.ico', 'assets'),
+]
 
 a = Analysis(
     ['main.py'],

@@ -12,7 +12,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sitreminder import config, quips, timer  # noqa: E402
+from sitreminder import autostart, config, paths, quips, timer  # noqa: E402
 
 
 class ConfigTests(unittest.TestCase):
@@ -155,6 +155,73 @@ class QuipTests(unittest.TestCase):
                  None: "默认", 42: "默认", "": "默认"}
         for raw, want in cases.items():
             self.assertEqual(config._sanitize_quip_style(raw), want)
+
+
+class AutostartTests(unittest.TestCase):
+    """开机自启（FR-7）的启动命令构造与注册表读写。
+
+    注册表用例只碰一个**专用的临时子键**（`Software\\SitReminderAutostartTest`），
+    测完连值带键一起删掉 —— 绝不触碰真正的 Run 键，免得动到用户已有的启动项。
+    """
+
+    TEST_KEY = r"Software\SitReminderAutostartTest"
+    TEST_NAME = "UnitTestEntry"
+
+    def test_launch_command_quotes_every_argument(self):
+        cmd = autostart.launch_command()
+        self.assertTrue(cmd.startswith('"'), cmd)
+        self.assertTrue(cmd.endswith('"'), cmd)
+        # 至少两个参数（解释器 + 入口），每个都带引号 → 引号数必为偶数且 ≥4
+        self.assertGreaterEqual(cmd.count('"'), 4, cmd)
+
+    def test_launch_argv_source_mode_targets_main_py(self):
+        argv = autostart.launch_argv()
+        if paths.IS_FROZEN:
+            self.assertEqual(len(argv), 1)      # 打包版就是 exe 自己
+            return
+        self.assertEqual(len(argv), 2)
+        self.assertEqual(os.path.basename(argv[1]), "main.py")
+        self.assertTrue(os.path.exists(argv[1]), argv[1])
+        # 源码模式优先用 pythonw（无控制台窗口）；没有则退回当前解释器
+        self.assertIn(os.path.basename(argv[0]).lower(),
+                      ("python.exe", "pythonw.exe"))
+
+    def test_platform_support_flag(self):
+        expected = (sys.platform in ("win32", "darwin")
+                    or sys.platform.startswith("linux"))
+        self.assertEqual(autostart.is_supported(), expected)
+
+    @unittest.skipUnless(sys.platform == "win32", "仅 Windows 注册表")
+    def test_registry_roundtrip_in_temp_key(self):
+        import winreg
+        try:
+            # 起点干净：确保本用例的临时值不存在
+            autostart._win_remove(self.TEST_KEY, self.TEST_NAME)
+            self.assertIsNone(autostart._win_read(self.TEST_KEY, self.TEST_NAME))
+
+            # 写入 → 读回
+            autostart._win_write(r'"C:\fake\SitReminder.exe"',
+                                 self.TEST_KEY, self.TEST_NAME)
+            self.assertEqual(
+                autostart._win_read(self.TEST_KEY, self.TEST_NAME),
+                r'"C:\fake\SitReminder.exe"')
+
+            # 删除 → 读不到了
+            self.assertTrue(autostart._win_remove(self.TEST_KEY, self.TEST_NAME))
+            self.assertIsNone(autostart._win_read(self.TEST_KEY, self.TEST_NAME))
+
+            # 再删一次：值本就不存在，应返回 False 而不是抛异常（幂等）
+            self.assertFalse(autostart._win_remove(self.TEST_KEY, self.TEST_NAME))
+        finally:
+            try:
+                winreg.DeleteKey(winreg.HKEY_CURRENT_USER, self.TEST_KEY)
+            except OSError:
+                pass
+
+    @unittest.skipUnless(sys.platform == "win32", "仅 Windows 注册表")
+    def test_reading_absent_key_returns_none(self):
+        self.assertIsNone(
+            autostart._win_read(r"Software\SitReminderNoSuchKey", "nope"))
 
 
 if __name__ == "__main__":

@@ -61,6 +61,8 @@ class SettingsWindow(QWidget):
         # 用户无法判断真实状态；点一下保存还会把已开的自启写成关闭。
         self._auto = QCheckBox("开机自动启动")
         self._auto.setChecked(bool(cfg.get("autostart", False)))
+        self._auto.setToolTip("勾选：把妮子登记到系统的开机启动项，下次开机自动运行\n"
+                              "不勾：移除该启动项（只动本程序那一条，不影响其它软件）")
 
         # ---- 倒计时贴纸显示模式
         self._capsule = QCheckBox("倒计时始终显示")
