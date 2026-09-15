@@ -37,7 +37,7 @@
 
 ```bash
 # 依赖：Python 3.10–3.14、PySide6（Qt6 GUI）
-pip install PySide6-Essentials
+pip install -r requirements.txt
 python main.py
 
 # Windows 下想避免黑色控制台窗口一闪而过：
@@ -72,7 +72,7 @@ python main.py --debug
 
 ```bash
 # ① 装依赖（Python 3.10 – 3.14）
-pip install PySide6-Essentials pyinstaller
+pip install -r requirements.txt
 
 # ② 在仓库根目录执行 —— spec 里用的是相对路径（main.py、assets/…），换目录会找不到文件
 pyinstaller SitReminder.spec
@@ -129,6 +129,7 @@ tests/
   smoke_qt.py               # Qt 版 GUI 渲染冒烟（输出预览图到 assets/_previews/）
   smoke_main_entry.py       # 入口冒烟（单实例保护等）
 SitReminder.spec            # PyInstaller 打包配置（Windows）
+requirements.txt            # 依赖清单（pip install -r requirements.txt）
 需求文档.md                  # 需求梳理文档
 ```
 
@@ -142,7 +143,7 @@ SitReminder.spec            # PyInstaller 打包配置（Windows）
 # 建议先建虚拟环境并安装依赖（避免污染系统 Python）
 python -m venv .venv
 # Windows: .venv\Scripts\activate     Linux/macOS: source .venv/bin/activate
-pip install PySide6-Essentials
+pip install -r requirements.txt
 
 # 核心逻辑测试（不弹窗口；框架无关，任何解释器都能跑）
 python -m unittest discover -s tests -v

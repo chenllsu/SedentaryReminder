@@ -1,0 +1,14 @@
+# SedentaryReminder 依赖清单
+#
+# 一次性装齐（含打包工具）：
+#     pip install -r requirements.txt
+#
+# 注意：Python 版本需为 3.10 – 3.14（PySide6 的硬性约束，3.9 没有可用轮子）
+#      建议先建虚拟环境：python -m venv .venv
+
+# ---- 运行依赖（源码运行与打包都需要）----
+PySide6-Essentials>=6.11,<7
+
+# ---- 打包 exe 时额外需要（只跑源码可以不装）----
+# PyInstaller 会自动带上 pyinstaller-hooks-contrib，PySide6 的打包 hook 就在里面
+pyinstaller>=6.22
