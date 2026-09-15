@@ -16,7 +16,8 @@
 - ⚙️ **自定义间隔** — 提醒间隔支持分钟（1–600）与秒（5–36000）两种单位，切换单位时已输入的数字保持不变，保存到本地 `config.json`，重启不丢
 - ⏸️ **暂停 / 跳过** — 开会吃饭可暂停计时；刚活动完可跳过本轮、立即重新计时
 - 🧊 **开设置自动冻结计时** — 打开设置窗口时倒计时自动暂停；没改间隔就关窗，则从冻结点继续；改了间隔并保存，则按新间隔重新计时
-- 🖥️ **系统托盘** — 最小化到托盘常驻，右键菜单含「显示 / 设置 / 暂停·继续 / 跳过本次 / 退出」；「暂停」文字会跟着当前状态变，一眼看出停没停
+- 🚀 **开机自启** — 设置里勾一下即可（Windows 注册表 Run 项 / macOS LaunchAgents / Linux XDG autostart 三平台各自实现），不勾则移除该条目；只动本程序那一条，不影响其它软件
+- 🖥️ **系统托盘** — 最小化到托盘常驻，右键菜单含「隐藏 / 显示 / 设置 / 暂停·继续 / 跳过本次 / 退出」。首项文字跟着妮子是否在桌面上自动切换（在桌上时显示「隐藏」，收起时显示「显示」），「暂停·继续」同样跟着计时状态变
 - 🖼️ **高 DPI 友好** — 按屏幕缩放比例取物理像素渲染并标注 DPR，高分屏下不糊不锯齿
 - 🔒 **单实例保护** — 重复启动不会开出两只猫，而是提示「妮子已经在桌面上啦～」
 
@@ -24,19 +25,19 @@
 
 ### 方式一：打包成 exe 运行（推荐，免装 Python）
 
-用下方「从源码打包」生成 `SitReminder.exe`，双击运行即可（已在 Windows 上实测通过，单文件约 57 MB）。
+用下方「从源码打包」生成 `SitReminder.exe`，双击运行即可（已在 Windows 上实测通过，单文件约 37 MB）。
 
 - **首次启动约需 20 秒**：单文件模式启动时要先把自身解包到临时目录，这段时间看不到妮子属正常现象，之后就快了
 - 首次运行 Windows 可能弹出 SmartScreen 提示（无签名正常现象），点「仍要运行」
-- `config.json` 会在 exe 同目录自动生成，记录间隔 / 窗口位置 / 贴纸常驻偏好
+- `config.json` 会在 exe 同目录自动生成，记录间隔 / 窗口位置 / 贴纸显示 / 话术风格 / 开机自启偏好
 - 想让设置和窗口位置存得住，**别把 exe 放在 `C:\Program Files` 这类只读目录**（那里写不进文件）
-- 想开机自启：把 exe 的快捷方式放进 `shell:startup` 文件夹（Win+R 输入 `shell:startup`）
+- 想开机自启：在设置窗勾选「开机自动启动」即可（程序会把自己登记进系统启动项）；也可以手动把 exe 的快捷方式放进 `shell:startup` 文件夹（Win+R 输入 `shell:startup`）
 
 ### 方式二：从源码运行
 
 ```bash
-# 依赖：Python 3.9+、PySide6（Qt6 GUI）；Pillow 仅少量图像处理脚本用到
-pip install PySide6 pillow
+# 依赖：Python 3.10–3.14、PySide6（Qt6 GUI）
+pip install PySide6-Essentials
 python main.py
 
 # Windows 下想避免黑色控制台窗口一闪而过：
@@ -46,7 +47,8 @@ pythonw main.py
 python main.py --debug
 ```
 
-> 只做界面的话装 `PySide6-Essentials` 就够（约 77 MB，不含 WebEngine 等用不到的模块），体积比完整版小很多。
+> **版本要求**：Python 3.10 – 3.14 之间（这是 `PySide6` 自身的约束，3.9 装不上轮子），推荐 3.13。
+> 装 `PySide6-Essentials`（约 77 MB，含 QtWidgets / QtGui 等必需件）就够，不必装完整版 `PySide6` —— 后者会连带 WebEngine、3D 等用不到的模块，白白多下几百 MB。
 
 ## 使用说明
 
@@ -57,23 +59,30 @@ python main.py --debug
 | 悬停小猫 | 贴纸变清晰；若之前是隐藏状态，则此时出现 |
 | 单击小猫 | **无动作**（左键只用于拖动，避免误触弹出窗口） |
 | 右键小猫 | 设置 / 暂停计时·继续计时 / 跳过本次 / 关闭… |
-| 右键托盘图标 | 显示 / 设置 / 暂停计时·继续计时 / 跳过本次 / 退出 |
-| 单击托盘图标 | 把小猫浮窗调回桌面（「关闭… → 最小化到托盘」之后靠它找回） |
+| 右键托盘图标 | 隐藏 / 显示（文字随妮子当前是否在桌面上自动切换）/ 设置 / 暂停计时·继续计时 / 跳过本次 / 退出 |
+| 单击托盘图标 | **无动作**（显隐统一走右键菜单首项，避免两个入口造成误触） |
 | 打开设置窗口 | 倒计时自动冻结；未改间隔 → 关窗后从冻结点继续；改了间隔并保存 → 按新间隔重新计时 |
 | 设置窗「话术风格」 | 选妮子说话的调性：默认 / 傲娇 / 温柔 / 呆萌 / 冷漠 / 可爱 / 随机（每次任意风格）。随「保存」生效并记入配置，重启不丢 |
 | 设置窗「倒计时始终显示」 | 勾选（默认）= 贴纸常驻淡显；不勾 = 平时隐藏，悬停或暂停才出现。保存后即时生效，不用重启 |
-| 设置窗「开机自动启动」 | 记录偏好（详见「配置文件」一节，目前仅记录、未真正写入系统启动项） |
+| 设置窗「开机自动启动」 | 勾选 = 把妮子登记进系统启动项；不勾 = 移除该条目（只动本程序那一条）。随「保存」生效，详见「配置文件」一节 |
 | 点「关闭…」 | 弹出三选一：退出程序 / 最小化到托盘 / 取消（弹窗会自动避开屏幕边缘，不会被挤到屏外） |
 | 提醒弹出后点「知道了」 | 关闭气泡，重新开始计时（气泡显示期间按下的暂停不会被这一步清掉） |
 
 ## 从源码打包
 
 ```bash
-pip install pyinstaller
+# ① 装依赖（Python 3.10 – 3.14）
+pip install PySide6-Essentials pyinstaller
+
+# ② 在仓库根目录执行 —— spec 里用的是相对路径（main.py、assets/…），换目录会找不到文件
 pyinstaller SitReminder.spec
+
 # 产物在 dist/SitReminder.exe
-# 单文件约 57 MB，构建约 2–3 分钟
+# 单文件约 37 MB，构建约 1.5–2.5 分钟
 ```
+
+- spec 里 `upx=True`：本机没装 [UPX](https://upx.github.io/) 只会打一行警告，构建照样成功，只是体积略大
+- 构建完可以跑一遍核心逻辑测试确认没改坏：`python -m unittest discover -s tests`
 
 > 打包版与源码版的配置**互相独立**：打包版读写 exe 同目录的 `config.json`，
 > 源码版读写项目根目录的 `config.json`。在一边改了设置，不影响另一边。
@@ -86,6 +95,9 @@ pyinstaller --onefile --noconsole --name SitReminder \
   --add-data "assets;assets" main.py
 ```
 
+> `--add-data` 的分隔符 Windows 用分号（`源;目标`），macOS / Linux 用冒号（`源:目标`）。
+> `SitReminder.spec` 是按 Windows 写的（图标路径为反斜杠、单文件配置），非 Windows 平台建议改用上面这条手写命令。
+
 ## 项目结构
 
 ```
@@ -94,35 +106,35 @@ sitreminder/
   config.py                 # 配置读写（校验 + 旧字段迁移 + 原子写入 + 窗口位置解析）
   timer.py                  # 倒计时状态机（基于时间戳，不累积误差；支持暂停/恢复/跳过）
   quips.py                  # 内置文案库（默认 + 傲娇/温柔/呆萌/冷漠/可爱/随机 七种风格）与随机选取
-  theme.py                  # 配色 / 字体 / 动画常量（Tk 版样式；保留作参考）
   paths.py                  # 运行路径（源码运行 vs PyInstaller 打包）
   logging_setup.py          # 日志初始化（滚动文件，便于排查）
   single_instance.py        # 单实例保护（Win 互斥体 / Unix 文件锁）
-  qt/                       # PySide6 (Qt6) UI 层 —— 当前主用
+  autostart.py              # 开机自启（Win 注册表 Run / macOS LaunchAgents / Linux XDG autostart）
+  qt/                       # PySide6 (Qt6) UI 层
     app.py                  # QtController：浮窗 + 计时 + 托盘 + 位置记忆 + 交互编排
     window.py               # 主浮窗（真透明 + QPainter 抗锯齿 + 倒计时贴纸 + 高 DPI 素材加载）
     bubble.py               # 到点提醒气泡（真阴影 + 真文字）
     settings.py             # 设置窗口（标准控件；关闭时通知控制器决定续算/重算）
     choice.py               # 关闭三选一（退出 / 最小化到托盘 / 取消）
     qtheme.py               # Qt 主题色/字体常量
-  app.py / imagery.py / tray.py / ui/  # 早期 Tkinter 实现（保留作参考与回退路径）
 assets/
-  nizi.png                  # 早期形象
-  nizi_clean.png            # 抠图后的桌面形象（Tk 版使用，1920 原图）
-  nizi_clean_qt.png         # Qt 版形象：512px 高清、边缘去色晕（高 DPI 适配）
-  nizi_user_source.jpg      # 原始素材
-  icon.ico                  # exe 图标
+  nizi_clean_qt.png         # 当前主用形象：512px 高清、边缘去色晕（高 DPI 适配）
+  nizi_clean.png            # 兜底形象（主图或托盘图缺失时降级使用）
+  icon.ico                  # exe 与窗口图标
+  nizi.png                  # 早期形象（仅开发期参考，不进包）
+  nizi_user_source.jpg      # 原始素材（仅开发期参考，不进包）
   _previews/                # 冒烟测试输出的预览图（自动生成，可忽略）
 tests/
-  test_core.py              # 核心逻辑单元测试（无 GUI）
+  test_core.py              # 核心逻辑单元测试（无 GUI，23 项）
   smoke_qt.py               # Qt 版 GUI 渲染冒烟（输出预览图到 assets/_previews/）
-  smoke_gui.py              # Tk 版 GUI 冒烟（回退路径）
   smoke_main_entry.py       # 入口冒烟（单实例保护等）
-clean_bg.py                 # 抠图脚本（早期）
-clean_bg_cat.py             # 精细抠图脚本（flood-fill + defringe + 羽化）
-SitReminder.spec            # PyInstaller 打包配置（Qt 版）
+SitReminder.spec            # PyInstaller 打包配置（Windows）
 需求文档.md                  # 需求梳理文档
 ```
+
+> 打包时只带入 `nizi_clean_qt.png`、`nizi_clean.png`、`icon.ico` 三个资源；
+> 早期 Tkinter 实现（`app.py` / `imagery.py` / `tray.py` / `theme.py` / `ui/`）与抠图脚本
+> （`clean_bg.py` / `clean_bg_cat.py`）已在 Qt 迁移完成后移除，需要时从 git 历史里取回。
 
 ## 开发
 
@@ -130,22 +142,20 @@ SitReminder.spec            # PyInstaller 打包配置（Qt 版）
 # 建议先建虚拟环境并安装依赖（避免污染系统 Python）
 python -m venv .venv
 # Windows: .venv\Scripts\activate     Linux/macOS: source .venv/bin/activate
-pip install PySide6 pillow
+pip install PySide6-Essentials
 
-# 核心逻辑测试（不弹窗口；框架无关，用解释器跑）
+# 核心逻辑测试（不弹窗口；框架无关，任何解释器都能跑）
 python -m unittest discover -s tests -v
 
 # Qt 版 GUI 渲染冒烟（要求装了 PySide6 的解释器；会输出预览图到 assets/_previews/）
 python tests/smoke_qt.py
 
-# Tk 版 GUI 冒烟（回退路径；需装了 tkinter 的解释器）
-python tests/smoke_gui.py
-
 # 带调试日志启动
 python main.py --debug
 ```
 
-> 提示：源码里只有 Qt 版（`sitreminder/qt/`）是当前主用；Tk 版（`sitreminder/ui/`、`app.py` 等）是早期实现，保留作回退路径。若本机没有图形界面 / 未安装 tkinter，跳过 `smoke_gui.py` 即可。
+> 提示：UI 只有 Qt 版（`sitreminder/qt/`）这一套，早期 Tkinter 实现已移除。
+> 核心逻辑测试 `test_core.py` 不依赖 Qt，普通解释器即可运行；`smoke_qt.py` 需要装了 PySide6 的解释器。
 
 日志写入用户数据目录（Windows：`%LOCALAPPDATA%\SitReminder\sitreminder.log`），
 打包成无控制台版本后也能据此排查问题。
@@ -157,7 +167,7 @@ python main.py --debug
 | 字段 | 说明 |
 |------|------|
 | `interval_seconds` | 提醒间隔（秒）。旧版的 `interval_minutes` 会自动迁移 |
-| `autostart` | 开机自启偏好（当前仅记录，未真正写入系统启动项） |
+| `autostart` | 开机自启开关。开启后程序会把自己写进系统启动项（Windows 注册表 `HKCU\...\CurrentVersion\Run`、macOS `~/Library/LaunchAgents`、Linux `~/.config/autostart`）；打包版登记 exe 自身，源码版登记 `pythonw main.py`（避免黑框）。写入失败只记日志，不会让「保存」崩掉 |
 | `window_pos` | 浮窗最后位置 `[x, y]`；`null` 表示从未拖动过（首次启动走右下角） |
 | `capsule_always_visible` | 倒计时贴纸是否常驻显示（默认 `true`）。`false` = 平时隐藏，悬停或暂停才出现；缺失或非布尔值自动规整为默认值 |
 | `quip_style` | 话术风格：`默认` / `傲娇` / `温柔` / `呆萌` / `冷漠` / `可爱` / `随机`（默认 `默认`）。手改配置出现非法值会自动回退默认 |
@@ -171,12 +181,13 @@ python main.py --debug
 - **倒计时贴纸配色取自本体**：奶米内芯 + 白色剪纸外框 + 爪印图标 + 深棕数字，与小猫的奶咖色系同源；暂停态整体转琥珀
 - **暂停状态只有一个真相源**：一律以 `timer.is_paused` 为准，浮窗菜单、托盘菜单、设置窗按钮、贴纸底色都由它统一驱动，避免出现「底色变了但文字没跟上」的不一致
 - **弹窗按钮必须显式配色**：在「半透明 + `Qt.Popup`」窗口上，Qt 的 Windows11 风格会把未指定样式的默认按钮画成白底白字，与奶油色卡片融为一体（看起来像一张没有按钮的空卡），因此 `choice.py` 里为按钮显式定死了配色
+- **显隐入口只留一个**：托盘图标单击不绑任何动作，隐藏 / 显示统一走右键菜单首项 —— 同一动作给两个入口容易误触
 - **动画**：气泡使用 easeOut 缓动的生长动画；倒计时贴纸用不透明度补间在「淡显 ↔ 清晰」之间平滑过渡，进出自然不生硬
 - **防出屏**：气泡与「关闭…」确认框在屏幕边缘会自动收拢（右/下放不下时翻到另一侧或收进可用区），气泡尾巴始终指向小猫
 
 ## 环境支持
 
-- Windows — 已完整测试；PyInstaller 打包产物已实机验证（单文件约 57 MB，浮窗显示 / 资源解包 / Qt 插件 / 日志写入 / 配置读写均正常）
+- Windows — 已完整测试；PyInstaller 打包产物已实机验证（单文件约 37 MB，浮窗显示 / 资源解包 / Qt 插件 / 日志写入 / 配置读写 / 托盘显隐 / 开机自启均正常）
 - Linux / macOS — 理论可运行（代码内含 Unix 单实例锁与路径分支），未打包测试，欢迎反馈
 
 ## License
