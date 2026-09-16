@@ -17,6 +17,8 @@ class TimerState:
         self.paused = False
         self._remaining = float(self.interval)
         self._end: datetime = None
+        # 本轮暂停的起始时刻；未暂停时为 None。用来算「已暂停多久」。
+        self._pause_started: datetime = None
         self.reset()
 
     @property
@@ -37,6 +39,7 @@ class TimerState:
         self._end = datetime.now() + timedelta(seconds=self.interval)
         if not keep_paused:
             self.paused = False
+            self._pause_started = None
 
     def skip(self, keep_paused: bool = False) -> None:
         """跳过本轮（等价于「刚活动过，重新计」）。
@@ -49,11 +52,13 @@ class TimerState:
         if not self.paused:
             self._remaining = max(0.0, (self._end - datetime.now()).total_seconds())
             self.paused = True
+            self._pause_started = datetime.now()
 
     def resume(self) -> None:
         if self.paused:
             self._end = datetime.now() + timedelta(seconds=self._remaining)
             self.paused = False
+            self._pause_started = None
 
     def toggle(self) -> None:
         self.resume() if self.paused else self.pause()
@@ -63,6 +68,38 @@ class TimerState:
         if self.paused:
             return int(self._remaining)
         return max(0, int((self._end - datetime.now()).total_seconds()))
+
+    def paused_seconds(self) -> int:
+        """已暂停时长（秒）；未暂停返回 0。
+
+        与 remaining() 互补：暂停期间剩余时间是「冻住」的、没有信息量，
+        已暂停时长才是用户在意的那个数（是不是停太久了）。
+        """
+        if not self.paused or self._pause_started is None:
+            return 0
+        return max(0, int((datetime.now() - self._pause_started).total_seconds()))
+
+    def defer(self, seconds: int) -> None:
+        """把「本轮」提醒往后延（气泡里的「稍后提醒」）。
+
+        只挪这一轮的结束时间，**不改动用户设定的 interval**——
+        「这个提醒我先不处理」和「以后都改成 5 分钟一次」是两件事。
+        顺带解除暂停：用户点了「稍后提醒」，就是想让提醒继续跑起来。
+        """
+        seconds = max(1, int(seconds))
+        self.paused = False
+        self._pause_started = None
+        self._remaining = float(seconds)
+        self._end = datetime.now() + timedelta(seconds=seconds)
+
+    def restart_pause_clock(self) -> None:
+        """把「已暂停多久」的计时起点挪到现在（不改暂停状态，未暂停则空操作）。
+
+        用途：设置窗打开时计时会被程序冻结，那不是用户主动暂停。
+        若不重置起点，开着设置窗待一会儿再关，就会被误判成「暂停超时」。
+        """
+        if self.paused:
+            self._pause_started = datetime.now()
 
     def is_due(self) -> bool:
         """是否到点需要提醒（暂停中不触发）。"""

@@ -12,6 +12,12 @@ v0.7 改造（「爪印贴纸」统一）：
   - 去掉「久坐提醒」标签行与分隔线，只留正文 + 琥珀「知道了」按钮
   - 白卡 → 奶米贴纸卡（白剪纸外沿 + 细描边），与倒计时贴纸/关闭弹窗同一套语言
   - 320×200 → 260×148，内边距与按钮同步收紧，阴影改暖棕调
+
+v1.2 改造（体验优化）：
+  - 按钮区由单颗「知道了」改为并排两颗：「N 分钟后」（次级，白底）+
+    「知道了」（主，琥珀）。忙起来不想立刻起身时，可以先把这一轮推后。
+  - 新增 bubble_snoozed 信号：点「N 分钟后」时发它（控制器把本轮延后），
+    点「知道了」或关窗口时仍发 bubble_closed（控制器重置这一轮）。
 """
 from __future__ import annotations
 
@@ -39,6 +45,9 @@ TAIL_HALF = qtheme.BUBBLE_TAIL_HALF
 CARD_W = W - MARGIN * 2
 CARD_H = H - MARGIN * 2
 
+# 按钮区：两颗并排（「N 分钟后」次级 + 「知道了」主按钮）
+BTN_GAP = 10
+
 # 方向常量
 DIR_UP = "up"      # 气泡在猫上方，尾巴向下指向猫
 DIR_DOWN = "down"  # 气泡在猫下方，尾巴向上指向猫
@@ -47,17 +56,20 @@ DIR_RIGHT = "right"
 
 
 class BubbleWindow(QWidget):
-    """到点提醒气泡。提供 bubble_closed 信号（点按钮后发）。"""
+    """到点提醒气泡。提供 bubble_closed / bubble_snoozed 两个信号。"""
 
-    bubble_closed = Signal()
+    bubble_closed = Signal()     # 「知道了」/ 直接关窗 → 本轮结束
+    bubble_snoozed = Signal()    # 「N 分钟后」→ 本轮延后
 
     ANIM_STEPS = 12
     ANIM_MS = 14
 
-    def __init__(self, ctrl, text: str):
+    def __init__(self, ctrl, text: str, snooze_minutes: int = 5):
         super().__init__()
         self.ctrl = ctrl
         self.text = text
+        # 延后时长（分钟）只用于按钮文案，实际延后逻辑由控制器按配置执行。
+        self._snooze_minutes = max(1, int(snooze_minutes))
         self.setWindowTitle("久坐提醒")
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -69,7 +81,12 @@ class BubbleWindow(QWidget):
         self._anim_step = 0
         self._scale = 0.2
         self._started = False
-        self._hover_btn = False
+        # 鼠标悬停在哪颗按钮上：None / "later"（N 分钟后）/ "ok"（知道了）
+        self._hover = None
+        # 是否点了「N 分钟后」——closeEvent 据此决定发哪个信号
+        self._snoozed = False
+        self._ok_rect = None
+        self._later_rect = None
 
         # 文字自动折行
         self._lines = self._wrap(text)
@@ -284,21 +301,24 @@ class BubbleWindow(QWidget):
     def _draw_content(self, p, card):
         """分层布局：正文区 / 按钮区。
 
-        v0.7 去掉「久坐提醒」标签行与分隔线（视觉重心交给正文与琥珀按钮），
+        v0.7 去掉「久坐提醒」标签行与分隔线（视觉重心交给正文与按钮），
         正文夹在卡片顶部与按钮之间、按实际行数垂直居中。
         """
-        # ---- 按钮区（固定位置，卡片底部居中）
+        # ---- 按钮区（两颗并排，卡片底部居中）
         btn_w = qtheme.BUBBLE_BTN_W
         btn_h = qtheme.BUBBLE_BTN_H
-        btn_rect = QRectF(card.center().x() - btn_w / 2,
-                           card.bottom() - qtheme.BUBBLE_PAD_BOT - btn_h,
-                           btn_w, btn_h)
+        total = btn_w * 2 + BTN_GAP
+        x0 = card.center().x() - total / 2.0
+        btn_top = card.bottom() - qtheme.BUBBLE_PAD_BOT - btn_h
+        # 左：次级「N 分钟后」（先推后再说）；右：主「知道了」（Windows 习惯主键靠右）
+        later_rect = QRectF(x0, btn_top, btn_w, btn_h)
+        ok_rect = QRectF(x0 + btn_w + BTN_GAP, btn_top, btn_w, btn_h)
 
         # ---- 正文区（夹在卡片顶部与按钮之间）
         body_top = card.top() + qtheme.BUBBLE_PAD_TOP
         body_rect = QRectF(card.left() + qtheme.BUBBLE_PAD_X, body_top,
                            card.width() - qtheme.BUBBLE_PAD_X * 2,
-                           btn_rect.top() - qtheme.BUBBLE_GAP_BODY_BTN - body_top)
+                           btn_top - qtheme.BUBBLE_GAP_BODY_BTN - body_top)
 
         # 画正文（多行在 body_rect 内垂直居中）
         p.setPen(qtheme.STICKER_TEXT)
@@ -313,32 +333,61 @@ class BubbleWindow(QWidget):
             p.drawText(QPointF(lx, first_y + (i + 1) * line_h - fm.descent()),
                        line)
 
-        # 画按钮（hover 状态）：琥珀胶囊
+        # 按钮 1：次级「N 分钟后」（白底 + 描边，hover 变浅琥珀）
         path = QPainterPath()
-        path.addRoundedRect(btn_rect, btn_h / 2, btn_h / 2)
-        col = (qtheme.STICKER_ACCENT_HOVER if self._hover_btn
+        path.addRoundedRect(later_rect, btn_h / 2, btn_h / 2)
+        p.fillPath(path, qtheme.STICKER_BTN_HOVER if self._hover == "later"
+                   else qtheme.STICKER_BTN_BG)
+        p.setPen(QPen(qtheme.STICKER_BORDER, 1))
+        p.drawPath(path)
+        p.setPen(qtheme.STICKER_TEXT)
+        p.setFont(make_font(qtheme.FONT_BTN))
+        p.drawText(later_rect, Qt.AlignCenter, f"{self._snooze_minutes} 分钟后")
+
+        # 按钮 2：主「知道了」（琥珀胶囊）
+        path = QPainterPath()
+        path.addRoundedRect(ok_rect, btn_h / 2, btn_h / 2)
+        col = (qtheme.STICKER_ACCENT_HOVER if self._hover == "ok"
                else qtheme.STICKER_ACCENT_BG)
         p.fillPath(path, col)
         p.setPen(QPen(qtheme.STICKER_ACCENT_BORDER, 1))
         p.drawPath(path)
         p.setPen(qtheme.STICKER_ACCENT_TEXT)
         p.setFont(make_font(qtheme.FONT_BTN, bold=True))
-        p.drawText(btn_rect, Qt.AlignCenter, "知道了")
-        self._btn_rect = btn_rect
+        p.drawText(ok_rect, Qt.AlignCenter, "知道了")
+
+        self._ok_rect = ok_rect
+        self._later_rect = later_rect
 
     # ------------------------------------------------------------ 事件
+    def _hit_test(self, pos) -> str | None:
+        """命中哪颗按钮：None / "later" / "ok"。"""
+        if self._later_rect is not None and self._later_rect.contains(pos):
+            return "later"
+        if self._ok_rect is not None and self._ok_rect.contains(pos):
+            return "ok"
+        return None
+
     def mousePressEvent(self, e):
-        if self._btn_rect is not None and self._btn_rect.contains(e.position()):
+        hit = self._hit_test(e.position())
+        if hit == "later":
+            # 先记下意图：closeEvent 里据此发 bubble_snoozed（而不是 bubble_closed）
+            self._snoozed = True
+            self.close()
+        elif hit == "ok":
             self.close()
 
     def mouseMoveEvent(self, e):
-        hover = self._btn_rect is not None and self._btn_rect.contains(e.position())
-        if hover != self._hover_btn:
-            self._hover_btn = hover
+        hover = self._hit_test(e.position())
+        if hover != self._hover:
+            self._hover = hover
             self.update()
 
     def closeEvent(self, e):
-        self.bubble_closed.emit()
+        if self._snoozed:
+            self.bubble_snoozed.emit()
+        else:
+            self.bubble_closed.emit()
         super().closeEvent(e)
 
 

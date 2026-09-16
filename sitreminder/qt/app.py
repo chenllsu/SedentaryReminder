@@ -1,18 +1,28 @@
 """Qt6 控制器：组合计时器、主浮窗与对话框。
 
-复用框架无关的逻辑模块（config / timer / quips），UI 全走 Qt。
+复用框架无关的逻辑模块（config / timer / quips / quiet），UI 全走 Qt。
+
+v1.2 体验优化：
+  - 暂停超时自动恢复（check_pause_timeout，由主窗心跳驱动）
+  - 提醒气泡「N 分钟后」延后本轮（on_bubble_snoozed）
+  - 免打扰时段内不弹气泡（on_due 拦截，计时照走）
+  - 妮子大小三档即时应用（apply_settings）
 """
 from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime
 
 from PySide6.QtCore import Qt, QPoint, QRect
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QWidget
 from PySide6.QtGui import QIcon, QPixmap, QImage
 
-from .. import autostart, paths
-from ..config import load_config, save_config
+from .. import autostart, paths, quiet
+from ..config import (
+    DEFAULT_MASCOT_SIZE, DEFAULT_SNOOZE_SECONDS,
+    load_config, save_config, sanitize_mascot_size,
+)
 from ..timer import TimerState
 from ..quips import DEFAULT_STYLE, pick_quip
 from .window import SitReminderWindow
@@ -66,8 +76,8 @@ class QtController:
 
     # ------------------------------------------------------------ 启动
     def _build_main_window(self):
-        win = SitReminderWindow(self)
-        return win
+        # 妮子大小按配置注入（三档之一，见 config.MASCOT_SIZE_PRESETS）
+        return SitReminderWindow(self, self.cfg.get("mascot_size", DEFAULT_MASCOT_SIZE))
 
     def run(self):
         self.main_window = self._build_main_window()
@@ -188,6 +198,7 @@ class QtController:
         self.tray = QSystemTrayIcon(icon)
         self.tray.setToolTip("久坐提醒 · 妮子")
         # 每次弹出菜单前再同步一次：即使某条路径漏了更新，打开菜单时也必然正确。
+        # （暂停项文字里带「已停 N 分钟」，是个活值，必须弹出前重算。）
         tray_menu.aboutToShow.connect(self._sync_pause_state)
         tray_menu.aboutToShow.connect(self._sync_main_visible_state)
         self.tray.setContextMenu(tray_menu)
@@ -244,13 +255,48 @@ class QtController:
         self.timer.skip(keep_paused=frozen)
         self._sync_pause_state()
 
+    def pause_label(self, paused: bool) -> str:
+        """暂停项的文字（浮窗右键菜单与托盘菜单共用同一份文案）。
+
+        暂停中带上「已停多久」：暂停是个没有尽头的状态，
+        用户需要一眼看出自己停了多长时间，好判断要不要继续。
+        """
+        if not paused:
+            return "暂停计时"
+        mins = self.timer.paused_seconds() // 60
+        if mins < 1:
+            return "继续计时"
+        if mins < 60:
+            return f"继续计时（已停 {mins} 分钟）"
+        return f"继续计时（已停 {mins // 60} 小时 {mins % 60} 分）"
+
+    def check_pause_timeout(self):
+        """暂停超时自动恢复（由主窗每 250ms 的心跳调用）。
+
+        暂停是个"静态"状态，容易被遗忘：用户按了暂停去开会，
+        回来早就忘了这回事，提醒从此再也不响。超时后自动继续，
+        从**暂停那一刻冻结的剩余时间**接着走（不是跳过这一轮）。
+        配置为 0 表示永不自动恢复，暂停完全交给用户手动解除。
+        """
+        limit = int(self.cfg.get("pause_auto_resume_seconds", 0) or 0)
+        if limit <= 0 or not self.timer.is_paused:
+            return
+        # 设置窗打开时计时是"程序冻结"，不是用户主动暂停，不参与超时判断。
+        if self._settings is not None and self._settings.isVisible():
+            return
+        if self.timer.paused_seconds() < limit:
+            return
+        log.info("暂停已超过 %s 秒，自动恢复计时", limit)
+        self.timer.resume()
+        self._sync_pause_state()
+
     def _sync_pause_state(self):
         """把暂停状态同步到所有能显示它的地方（浮窗菜单 / 托盘菜单 / 设置窗）。"""
         paused = self.timer.is_paused
         if self.main_window:
             self.main_window.set_paused(paused)
         if self._tray_act_pause is not None:
-            self._tray_act_pause.setText("继续计时" if paused else "暂停计时")
+            self._tray_act_pause.setText(self.pause_label(paused))
         if self._settings is not None:
             # 不要求"可见"：打开设置时同步发生在 show() 之前（此刻 isVisible 还是
             # False），若加可见判断就会漏掉首次同步，按钮会停留在「暂停/继续」。
@@ -269,12 +315,37 @@ class QtController:
         self._tray_act_toggle.setText(
             "隐藏" if self.main_window.isVisible() else "显示")
 
+    # ------------------------------------------------------------ 提醒
+    def _in_quiet_hours(self) -> bool:
+        """当前是否处于免打扰时段（未启用一律 False）。"""
+        if not self.cfg.get("quiet_enabled"):
+            return False
+        return quiet.is_quiet_now(datetime.now(),
+                                  self.cfg.get("quiet_start"),
+                                  self.cfg.get("quiet_end"))
+
+    def _snooze_minutes(self) -> int:
+        """气泡「N 分钟后」按钮上的 N（分钟）。"""
+        seconds = int(self.cfg.get("snooze_seconds", DEFAULT_SNOOZE_SECONDS))
+        return max(1, seconds // 60)
+
     def on_due(self):
         if self._bubble is not None and self._bubble.isVisible():
             return
-        self._bubble = BubbleWindow(self, pick_quip(self.cfg.get("quip_style")))
+        if self._in_quiet_hours():
+            # 免打扰时段：不上屏，但**必须把这一轮翻过去**——
+            # 否则 is_due() 会一直为真，每 250ms 反复走到这里空转。
+            # 计时本身照走，时段一结束就恢复正常提醒。
+            log.info("处于免打扰时段（%s–%s），跳过本次提醒",
+                     self.cfg.get("quiet_start"), self.cfg.get("quiet_end"))
+            self.timer.reset(keep_paused=True)
+            self._sync_pause_state()
+            return
+        self._bubble = BubbleWindow(self, pick_quip(self.cfg.get("quip_style")),
+                                    snooze_minutes=self._snooze_minutes())
         self._bubble.show_near(self.main_window)
         self._bubble.bubble_closed.connect(self.on_bubble_closed)
+        self._bubble.bubble_snoozed.connect(self.on_bubble_snoozed)
 
     def on_bubble_closed(self):
         """气泡关闭 = 这一轮结束，重新计下一轮。
@@ -286,6 +357,18 @@ class QtController:
         self.timer.reset(keep_paused=True)
         self._sync_pause_state()
 
+    def on_bubble_snoozed(self):
+        """气泡里点「N 分钟后」：只把这一轮往后推，不动用户设定的间隔。
+
+        「这个提醒我先缓缓」和「以后都改成 5 分钟一次」是两件事，
+        所以走 timer.defer() 而不是 set_interval()。
+        """
+        seconds = int(self.cfg.get("snooze_seconds", DEFAULT_SNOOZE_SECONDS))
+        self.timer.defer(seconds)
+        self._sync_pause_state()
+        log.info("本次提醒已延后 %s 秒", seconds)
+
+    # ------------------------------------------------------------ 设置
     def open_settings(self):
         if self._settings is not None and self._settings.isVisible():
             self._settings.raise_()
@@ -296,6 +379,9 @@ class QtController:
         self._settings_interval_changed = False
         self._settings_pause_touched = False
         self.timer.pause()
+        # 这次冻结是程序行为（不是用户按的暂停），把「已暂停多久」的起点
+        # 挪到此刻，免得开着设置窗发会儿呆就被判成"暂停超时"。
+        self.timer.restart_pause_clock()
         self._settings = SettingsWindow(self, self.cfg)
         self._settings.saved.connect(self.apply_settings)
         self._settings.closed.connect(self._on_settings_closed)
@@ -317,23 +403,38 @@ class QtController:
         if not self._settings_interval_changed and not self._settings_pause_touched:
             # resume() 对"本来就是运行中"的状态是空操作，安全
             self.timer.resume()
+        # 若关窗后仍是暂停（用户显式接管），把暂停计时起点重置到此刻 ——
+        # 开窗期间那段时间不算进「暂停超时」。
+        self.timer.restart_pause_clock()
         self._settings_interval_changed = False
         self._settings_pause_touched = False
         self._sync_pause_state()
 
-    def apply_settings(self, interval_seconds: int, autostart_enabled: bool,
-                       capsule_always: bool = True,
-                       quip_style: str = DEFAULT_STYLE):
+    def apply_settings(self, values: dict):
+        """设置窗「保存」：落盘 + 即时应用。
+
+        values 只需要带**本次界面上有的**字段；没带的（如 snooze_seconds）
+        保持配置原值不动 —— 这也是把信号换成 dict 的原因之一。
+        """
+        values = dict(values or {})
         old_interval = int(self.cfg["interval_seconds"])
-        self.cfg["interval_seconds"] = interval_seconds
-        self.cfg["autostart"] = autostart_enabled
-        self.cfg["capsule_always_visible"] = capsule_always
-        self.cfg["quip_style"] = quip_style
+        self.cfg.update(values)
         if save_config(self.cfg):
             log.info("配置已保存")
-        # 贴纸显示模式立即生效（不依赖间隔是否变化）
+        else:
+            log.warning("配置保存失败，界面改动可能不会保留")
+
         if self.main_window:
-            self.main_window.set_capsule_always(capsule_always)
+            # 贴纸显示模式立即生效（不依赖间隔是否变化）
+            self.main_window.set_capsule_always(
+                bool(self.cfg.get("capsule_always_visible", True)))
+            # 妮子大小：换档保持的是窗口中心，左上角坐标会变，
+            # 所以换档后要补存一次位置，否则下次启动会按旧坐标把新尺寸窗口放歪。
+            if self.main_window.set_mascot_size(
+                    sanitize_mascot_size(self.cfg.get("mascot_size"))):
+                self.save_window_pos(self.main_window.pos())
+
+        interval_seconds = int(self.cfg["interval_seconds"])
         if interval_seconds != old_interval:
             # 间隔变了：按新间隔从完整时长重新开始计时
             self.timer.set_interval(interval_seconds)
@@ -344,7 +445,7 @@ class QtController:
             # 间隔未变：不碰计时器（保持冻结），关窗时从暂停处继续
             log.info("提醒间隔未变，计时保持冻结，关窗后继续")
         self._sync_pause_state()
-        self._apply_autostart(autostart_enabled)
+        self._apply_autostart(bool(self.cfg.get("autostart", False)))
 
     def _apply_autostart(self, enabled: bool):
         """把「开机自启」偏好真正落到操作系统（FR-7）。

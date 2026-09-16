@@ -23,6 +23,7 @@ hiddenimports = [
 # 其余素材（nizi.png、nizi_user_source.jpg、_previews/ 设计稿）仅开发期使用，不进包。
 datas = [
     ('assets/nizi_clean_qt.png', 'assets'),
+    ('assets/nizi_sleep_qt.png', 'assets'),
     ('assets/nizi_clean.png', 'assets'),
     ('assets/icon.ico', 'assets'),
 ]
