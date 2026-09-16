@@ -16,10 +16,11 @@ hiddenimports = [
     'sitreminder.qt.qtheme',
 ]
 
-# 只打包运行时真正用到的 3 个资源：
-#   nizi_clean_qt.png —— Qt 版猫图（512×512 高清源）
-#   nizi_clean.png    —— 猫图与托盘图标的兜底（paths.MASCOT_PATH）
-#   icon.ico          —— exe 与窗口图标
+# 只打包运行时真正用到的 4 个资源：
+#   nizi_clean_qt.png  —— Qt 版猫图·坐姿（512×512 高清源）
+#   nizi_sleep_qt.png  —— Qt 版猫图·睡姿（暂停时显示，与坐姿底边对齐）
+#   nizi_clean.png     —— 猫图与托盘图标的兜底（paths.MASCOT_PATH）
+#   icon.ico           —— exe 与窗口图标
 # 其余素材（nizi.png、nizi_user_source.jpg、_previews/ 设计稿）仅开发期使用，不进包。
 datas = [
     ('assets/nizi_clean_qt.png', 'assets'),
