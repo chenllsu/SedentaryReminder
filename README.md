@@ -30,7 +30,7 @@
 
 ### 方式一：打包成 exe 运行（推荐，免装 Python）
 
-用下方「从源码打包」生成 `SitReminder.exe`，双击运行即可（已在 Windows 上实测通过，单文件约 37 MB）。
+用下方「从源码打包」生成 `SitReminder.exe`，双击运行即可（已在 Windows 上实测通过，单文件约 23 MB）。
 
 - **首次启动约需 20 秒**：单文件模式启动时要先把自身解包到临时目录，这段时间看不到妮子属正常现象，之后就快了
 - 首次运行 Windows 可能弹出 SmartScreen 提示（无签名正常现象），点「仍要运行」
@@ -88,10 +88,11 @@ pip install -r requirements.txt
 pyinstaller SitReminder.spec
 
 # 产物在 dist/SitReminder.exe
-# 单文件约 37 MB，构建约 1.5–2.5 分钟
+# 单文件约 23 MB，构建约 1.5–2.5 分钟
 ```
 
-- spec 里 `upx=True`：本机没装 [UPX](https://upx.github.io/) 只会打一行警告，构建照样成功，只是体积略大
+- spec 里对打包清单做了体积裁剪（`_drop_from_bundle`）：剔除 Qt 的软件 OpenGL 渲染器、多语言翻译、以及不联网用到的网络/加密库等，单文件从 37 MB 降到约 23 MB，功能无变化
+- spec 里 `upx=True`：本机没装 [UPX](https://upx.github.io/) 只会打一行警告，构建照样成功。单文件模式本身已对每个文件做过 zlib 压缩，UPX 的边际收益很小，不装也不影响体积
 - 构建完可以跑一遍核心逻辑测试确认没改坏：`python -m unittest discover -s tests`
 
 > 打包版与源码版的配置**互相独立**：打包版读写 exe 同目录的 `config.json`，
@@ -207,7 +208,7 @@ python main.py --debug
 
 ## 环境支持
 
-- Windows — 已完整测试；PyInstaller 打包产物已实机验证（单文件约 37 MB，浮窗显示 / 资源解包 / Qt 插件 / 日志写入 / 配置读写 / 托盘显隐 / 开机自启均正常）
+- Windows — 已完整测试；PyInstaller 打包产物已实机验证（单文件约 23 MB，浮窗显示 / 资源解包 / Qt 插件 / 日志写入 / 配置读写 / 托盘显隐 / 开机自启均正常）
 - Linux / macOS — 理论可运行（代码内含 Unix 单实例锁与路径分支），未打包测试，欢迎反馈
 
 ## License
